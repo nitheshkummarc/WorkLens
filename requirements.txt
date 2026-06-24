@@ -1,0 +1,5 @@
+# WorkLens-RedRob — ranking-step dependencies (CPU-only, no network at rank time)
+# Deliberately minimal: stdlib csv/json/heapq do the heavy lifting so the
+# ranking step stays well inside the 5-min / 16-GB / CPU-only budget.
+pydantic>=2.5,<3.0
+pytest>=7.4
