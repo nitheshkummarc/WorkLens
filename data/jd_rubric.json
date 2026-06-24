@@ -1,0 +1,58 @@
+{
+  "version": "jd-rubric-v1",
+  "role": "Senior AI Engineer",
+  "description": "JD selections/vocabulary for the Senior AI Engineer role (REDROB_SCORING_DESIGN.md §1). Carries WHICH nodes/keys/lists apply; the numeric penalties, bands, bonuses and caps live in shared/config/scoring.py. module1_jd_rubric pairs the two into a JDProfile.",
+
+  "nice_to_have_nodes": [
+    "N7 LLM & Fine-tuning",
+    "N9 Distributed / Scale / Inference-opt"
+  ],
+
+  "anti_signals": [
+    "research_only",
+    "consulting_only",
+    "langchain_only",
+    "framework_tutorial",
+    "title_chasing",
+    "no_recent_handson",
+    "cv_speech_robotics"
+  ],
+
+  "anti_signal_vocab": {
+    "research_only": {
+      "research_terms": ["research scientist", "research fellow", "phd", "postdoc", "post-doctoral", "publication", "published paper", "arxiv", "thesis", "academic", "research lab", "research intern"],
+      "production_terms": ["deployed", "shipped", "production", "serving", "real users", "productionized"]
+    },
+    "langchain_only": {
+      "llm_wrapper_terms": ["langchain", "llamaindex", "llama index", "openai api", "gpt-4", "gpt wrapper", "prompt engineering", "chatgpt"],
+      "pre_llm_ml_terms": ["xgboost", "scikit-learn", "tensorflow", "pytorch", "recommendation", "ranking", "classification", "regression", "feature engineering"]
+    },
+    "framework_tutorial": {
+      "tutorial_terms": ["tutorial", "demo project", "course project", "bootcamp", "hello world", "sample app", "toy project", "udemy", "coursera project"]
+    },
+    "no_recent_handson": {
+      "senior_titles": ["architect", "tech lead", "technical lead", "engineering manager", "director", "vp", "vice president", "head of"]
+    },
+    "cv_speech_robotics": {
+      "domain_terms": ["computer vision", "image classification", "object detection", "image segmentation", "opencv", "speech recognition", "speech-to-text", "asr", "robotics", "slam", "autonomous driving"],
+      "ir_nlp_terms": ["retrieval", "search", "ranking", "nlp", "recommendation", "information retrieval"]
+    }
+  },
+
+  "consulting_companies": [
+    "TCS", "Tata Consultancy Services", "Infosys", "Wipro", "Accenture",
+    "Cognizant", "Capgemini", "HCL", "HCL Technologies", "Tech Mahindra",
+    "LTIMindtree", "Mindtree", "L&T Infotech", "Larsen & Toubro Infotech",
+    "Mphasis", "DXC", "DXC Technology", "Hexaware", "Persistent Systems",
+    "Birlasoft", "Coforge", "Zensar", "IBM Global Services", "NTT Data"
+  ],
+
+  "logistics_buckets": {
+    "office": ["Pune", "Noida"],
+    "welcome": ["Hyderabad", "Mumbai", "Delhi NCR", "Delhi", "New Delhi", "Gurgaon", "Gurugram"]
+  },
+  "logistics_target_cities": [
+    "Pune", "Noida", "Hyderabad", "Mumbai", "Delhi NCR", "Delhi",
+    "New Delhi", "Gurgaon", "Gurugram"
+  ]
+}

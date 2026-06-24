@@ -1,0 +1,60 @@
+{
+  "version": "ai-capability-ontology-v1",
+  "description": "Frozen AI Capability Ontology v1 (REDROB_SCORING_DESIGN.md §2). 9 nodes (N1-N9) with node-specific importances and strong/weak phrase families. Plain-language forms are included so demonstrated work scores without buzzwords. N10 (embeddings) is intentionally absent in v1.",
+  "nodes": [
+    {
+      "name": "N1 Retrieval & Search",
+      "importance": 1.0,
+      "strong_phrases": ["recommendation system", "recommender", "search relevance", "ranking system", "matching engine", "information retrieval", "semantic search", "rag", "nearest-neighbor", "nearest neighbor", "elasticsearch", "solr", "lucene"],
+      "weak_phrases": ["search", "relevance", "personalization", "query"]
+    },
+    {
+      "name": "N2 Embeddings & Vector",
+      "importance": 1.0,
+      "strong_phrases": ["embeddings", "sentence-transformers", "sentence transformers", "bge", "e5", "vector database", "faiss", "pinecone", "weaviate", "qdrant", "milvus", "hnsw", "dense retrieval", "two-tower"],
+      "weak_phrases": ["vector", "similarity", "encoder"]
+    },
+    {
+      "name": "N3 Ranking & Recommendation / LTR",
+      "importance": 1.0,
+      "strong_phrases": ["learning to rank", "ltr", "xgboost ranker", "lambdamart", "re-ranking", "reranking", "ranking model", "recommendation engine"],
+      "weak_phrases": ["ranking", "scoring", "recommend"]
+    },
+    {
+      "name": "N4 Evaluation & Experimentation",
+      "importance": 0.9,
+      "strong_phrases": ["ndcg", "mrr", "map", "precision@k", "offline evaluation", "a/b test", "online experiment", "offline-online correlation"],
+      "weak_phrases": ["evaluation", "metrics", "benchmark", "experiment"]
+    },
+    {
+      "name": "N5 ML Production & Deployment (MLOps)",
+      "importance": 1.0,
+      "strong_phrases": ["deployed to production", "model serving", "ml pipeline", "feature store", "productionized", "real users", "inference service", "monitoring", "drift"],
+      "weak_phrases": ["deployed", "production", "pipeline", "serving"]
+    },
+    {
+      "name": "N6 NLP / IR foundations",
+      "importance": 0.7,
+      "strong_phrases": ["nlp", "natural language processing", "text classification", "ner", "tokeniz*", "language model", "information retrieval"],
+      "weak_phrases": ["text", "language", "embedding"]
+    },
+    {
+      "name": "N7 LLM & Fine-tuning",
+      "importance": 0.3,
+      "strong_phrases": ["fine-tuning", "fine tuning", "lora", "qlora", "peft", "instruction tuning", "rlhf"],
+      "weak_phrases": ["llm", "prompt", "gpt"]
+    },
+    {
+      "name": "N8 Data & Feature pipelines",
+      "importance": 0.5,
+      "strong_phrases": ["data pipeline", "spark", "airflow", "dbt", "feature engineering", "etl", "warehouse", "kafka"],
+      "weak_phrases": ["data", "pipeline", "batch", "stream"]
+    },
+    {
+      "name": "N9 Distributed / Scale / Inference-opt",
+      "importance": 0.4,
+      "strong_phrases": ["distributed training", "large-scale inference", "latency optimization", "quantization", "throughput", "sharding"],
+      "weak_phrases": ["scale", "latency", "optimize"]
+    }
+  ]
+}

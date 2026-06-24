@@ -16,7 +16,7 @@ from pathlib import Path
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 
-# Committed data artifacts (built by Person B in `data/`).
+# Committed data artifacts (the ontology + JD rubric live in `data/`).
 DATA_DIR: Path = PROJECT_ROOT / "data"
 ONTOLOGY_PATH: Path = DATA_DIR / "ai_capability_ontology.json"
 JD_RUBRIC_PATH: Path = DATA_DIR / "jd_rubric.json"

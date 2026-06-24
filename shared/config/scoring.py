@@ -4,14 +4,14 @@ All values are taken **verbatim** from `REDROB_SCORING_DESIGN.md` (frozen design
 and cited by section. No logic lives here — only constants. Modules import these;
 nothing numeric is hardcoded in module logic (interface_contract.md §11).
 
-Ownership boundary (Person A `shared/config` vs Person B `data/jd_rubric.json`):
+Ownership boundary (`shared/config` vs `data/jd_rubric.json`):
   - THIS FILE owns the *numbers*: penalties, bands, bonuses, behavioral weights,
     sub-score tables, honeypot thresholds, clamp caps, multiplier floor.
   - `data/jd_rubric.json` owns the JD *selections / vocabulary*: which nodes are
     nice-to-have, anti-signal detection keywords, the consulting-company list, and
     the logistics target-city sets. `module1_jd_rubric` composes `JDProfile` by
     pairing the vocab/keys from the data file with the penalties/bands defined here.
-    => each constant has exactly one home; no number is duplicated across owners.
+    => each constant has exactly one home; no number is duplicated across sources.
 """
 
 from __future__ import annotations
@@ -28,6 +28,11 @@ NODE_STRENGTH_STRONG: Final[float] = 1.0   # demonstrated in career_history desc
 # §2 — assessment gates on `skill_assessment_scores` (0..100)
 STRONG_ASSESS_MIN: Final[float] = 50.0     # ≥50 → promote a claimed skill to strong
 STUFF_ASSESS_MIN: Final[float] = 30.0      # <30 → drop the skill (keyword stuffing)
+
+# §2 — phrase matching: terms this short or shorter match on word boundaries
+# (so "rag"/"map"/"ltr" never match inside "storage"/"roadmap"/"alter"); longer
+# terms match as substrings so stems ("tokeniz*") tolerate suffixes.
+SHORT_TERM_MAX_LEN: Final[int] = 4
 
 # ---------------------------------------------------------------------------
 # §1.4 — experience_factor E, keyed on years_of_experience (half-open bands)
@@ -63,7 +68,7 @@ ML_DEPTH_MAX: Final[float] = 1.10
 # ---------------------------------------------------------------------------
 # §1.3 — anti-signals → anti_penalty (subtractive; total capped). key → (penalty, is_hard_dq).
 # Only "research_only" is a hard DQ (caps base_capability at HARD_DQ_BASE_CEILING).
-# Detection vocabulary for each key lives in data/jd_rubric.json (Person B).
+# Detection vocabulary for each key lives in data/jd_rubric.json.
 # ---------------------------------------------------------------------------
 ANTI_SIGNAL_PENALTIES: Final[dict[str, tuple[float, bool]]] = {
     "research_only":     (0.25,  True),
