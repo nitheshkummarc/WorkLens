@@ -31,7 +31,7 @@ from shared.config import scoring
 from shared.models.candidate import Candidate, Skill
 from shared.models.capability import CapabilityProfile, NodeEvidence
 from shared.models.ontology import OntologyNode
-from shared.utils.phrase_matcher import any_match, first_match
+from shared.utils.phrase_matcher import PhraseGroup
 from shared.utils.text_fields import (
     career_entry_text,
     claimed_text,
@@ -57,6 +57,19 @@ class CapabilityExtractor:
             for node in nodes[:_ML_NODE_COUNT]
             for phrase in (node.strong_phrases + node.weak_phrases)
         )
+        self.ml_group = PhraseGroup(self.ml_phrases)
+        self.strong_groups = {
+            node.name: PhraseGroup(node.strong_phrases)
+            for node in nodes
+        }
+        self.weak_groups = {
+            node.name: PhraseGroup(node.weak_phrases)
+            for node in nodes
+        }
+        self.all_phrase_groups = {
+            node.name: PhraseGroup(node.strong_phrases + node.weak_phrases)
+            for node in nodes
+        }
 
     # -- node strength -------------------------------------------------------
     def _score_node(
@@ -68,28 +81,28 @@ class CapabilityExtractor:
         assessment: dict[str, float],
     ) -> NodeEvidence:
         # 1.0 — strong phrase demonstrated in career history.
-        phrase = first_match(demo_text, node.strong_phrases)
+        phrase = self.strong_groups[node.name].first_match(demo_text)
         if phrase is not None:
             return NodeEvidence(node=node.name, strength=1.0,
                                 source="career_description", evidence_phrase=phrase)
 
         # 1.0 — a validated skill (advanced/expert + assessment ≥ 50) matching the node.
-        node_phrases = node.strong_phrases + node.weak_phrases
+        node_phrases = self.all_phrase_groups[node.name]
         for skill in kept_skills:
             if (skill.proficiency in _STRONG_PROFICIENCIES
                     and assessment.get(skill.name, -1.0) >= scoring.STRONG_ASSESS_MIN
-                    and any_match(skill.name, node_phrases)):
+                    and node_phrases.any_match(skill.name)):
                 return NodeEvidence(node=node.name, strength=1.0,
                                     source="skill_verified", evidence_phrase=skill.name)
 
         # 0.5 — strong phrase claimed but not demonstrated.
-        phrase = first_match(claimed, node.strong_phrases)
+        phrase = self.strong_groups[node.name].first_match(claimed)
         if phrase is not None:
             return NodeEvidence(node=node.name, strength=0.5,
                                 source="skill_unverified", evidence_phrase=phrase)
 
         # 0.5 — weak/ambiguous phrase, but in demonstrated work.
-        phrase = first_match(demo_text, node.weak_phrases)
+        phrase = self.weak_groups[node.name].first_match(demo_text)
         if phrase is not None:
             return NodeEvidence(node=node.name, strength=0.5,
                                 source="career_description", evidence_phrase=phrase)
@@ -101,7 +114,7 @@ class CapabilityExtractor:
     def _ml_relevant_months(self, candidate: Candidate) -> int:
         total = 0
         for entry in candidate.career_history:
-            if any_match(career_entry_text(entry), self.ml_phrases):
+            if self.ml_group.any_match(career_entry_text(entry)):
                 total += entry.duration_months
         return total
 
