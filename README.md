@@ -8,18 +8,16 @@ network calls — and its only runtime dependency is `pydantic`.
 **Live demo:** https://huggingface.co/spaces/nitheshkummar/redrob — rank a small
 candidate sample in the browser.
 
-## About the project
+## Overview
 
-**The challenge.** RedRob's *Intelligent Candidate Discovery & Ranking* task: from a pool
+**Challenge Overview:** RedRob's *Intelligent Candidate Discovery & Ranking* task: from a pool
 of 100,000 profiles, return the 100 best fits for a fixed **Senior AI Engineer** job
 description — in under 5 minutes, on 16 GB CPU, with no GPU and no network. The dataset is
 seeded with traps: keyword-stuffers (e.g. an HR Manager listing 9 AI skills), plain-language
 strong fits, and ~80 "honeypot" profiles that are subtly impossible.
 
-**The approach.** An LLM or embedding search can't scale to 100K within the time budget and
-tends to reward keyword overlap, so this is a transparent scoring engine instead. The idea it
-hangs on: **score what a candidate demonstrably did in their career history, not what they
-list as skills.** A capability score is built from that, rescaled by a behavioral multiplier
+**The approach:** An LLM or embedding search can't scale to 100K within the time budget and
+tends to reward keyword overlap, so this is a transparent scoring engine instead. The core design principle is simple: **score what a candidate demonstrably did in their career history, not what they list as skills.** A capability score is built from that, rescaled by a behavioral multiplier
 (recency, responsiveness, availability), and provably-impossible profiles are forced to zero.
 Every ranking comes with a one-sentence, fact-based reason.
 
@@ -33,7 +31,7 @@ pip install -r requirements.txt
 python rank.py --candidates ./candidates.jsonl --out ./submission.csv
 ```
 
-`candidates.jsonl` isn't in the repo (it's ~465 MB) — point `--candidates` at your copy
+`candidates.jsonl` isn't in the repo  — point `--candidates` at your copy
 (a plain `.jsonl` or a gzipped `.jsonl.gz` both work). Check the result with the official
 validator:
 
@@ -44,7 +42,7 @@ python validate_submission.py submission.csv
 ## Reproducing the submission (Stage 3)
 
 - **One command**, shown above, turns the candidate file into the CSV — no hidden steps or
-  manual edits. Name the output as your team id: `--out ./<your_team_id>.csv`.
+  manual edits. Name the output : `--out ./<team-name>.csv`.
 - **No pre-computation** — no embeddings, indexes, or model weights; the only inputs are the
   two committed files under `data/`, so there's nothing to build first.
 - **Dependencies:** `requirements.txt` (only `pydantic` at ranking time; `pytest` for tests).
@@ -94,6 +92,7 @@ docs/          methodology write-up
 
 Module order: 1 JD rubric → 2 capability → 3 capability fit → 4 behavioural →
 5 honeypot → 6 ranking (streaming top-100 heap) → 7 reasoning → 8 CSV + validation.
+
 
 ## Verification
 
