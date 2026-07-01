@@ -1,10 +1,8 @@
-"""CSV serialization (§6) — module8.
+"""Write the submission CSV — module8.
 
-Writes the exact submission format: header `candidate_id,rank,score,reasoning`,
-UTF-8, then 100 data rows ordered by rank. Scores are written with fixed 6-decimal
-formatting (the rounded final), so the file is unambiguous and the non-increasing /
-tie-break invariants survive a float round-trip. `csv.writer` quotes any reasoning
-containing commas or quotes.
+Header candidate_id,rank,score,reasoning (UTF-8), then 100 rows ordered by rank.
+Scores use fixed 6-decimal formatting so the non-increasing and tie-break rules
+survive a float round-trip. csv.writer quotes any reasoning with commas or quotes.
 """
 
 from __future__ import annotations

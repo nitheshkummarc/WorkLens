@@ -1,9 +1,7 @@
-"""AI capability ontology node model (§2 data).
+"""One AI-capability ontology node.
 
-Loaded from `data/ai_capability_ontology.json` by `shared/utils/ontology_loader`.
-Consumed by module1 (importances → JD rubric) and module2 (phrase matching →
-node strengths). The 9 nodes (N1–N9) and their importances/phrases are frozen
-per `REDROB_SCORING_DESIGN.md` §2. N10 (embeddings) is NOT present in v1.
+Loaded from data/ai_capability_ontology.json. Module1 uses the importances, module2
+matches the phrases. There are 9 nodes (N1-N9); the embedding node N10 is not used.
 """
 
 from __future__ import annotations

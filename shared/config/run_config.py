@@ -1,8 +1,7 @@
-"""Run-time configuration for a single ranking run.
+"""Configuration for a single ranking run.
 
-Mirrors interface_contract.md §11. The AS_OF date is the dataset's stated most-recent
-`last_active_date` (2026-05-27) — recency is measured against this, **never**
-`datetime.now()`, so the pipeline is fully deterministic and reproducible.
+The AS_OF date is the dataset's latest last_active_date (2026-05-27); recency is
+measured against it, never datetime.now(), so the run is reproducible.
 """
 
 from __future__ import annotations

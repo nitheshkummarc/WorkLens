@@ -1,12 +1,11 @@
-"""Build the JD rubric (§1) — one `JDProfile` for the whole run.
+"""Build the JD rubric — one JDProfile for the whole run.
 
-Composes the frozen ontology importances (data) with the JD selections/vocabulary
-(`data/jd_rubric.json`) and the numeric constants (`shared/config/scoring.py`)
-into a single immutable `JDProfile`. Runs **once** at startup (PHASE0 §3c); the
-result is reused for every candidate.
+Combines the ontology importances, the JD selections in data/jd_rubric.json, and
+the constants in scoring.py into one JDProfile. Runs once at startup and is reused
+for every candidate.
 
-`tier` is a display-only coarse bucket of `importance` — the scoring input is the
-node-specific `importance`, never the tier.
+`tier` is a display-only bucket of `importance`; the scoring input is always the
+node-specific `importance`, not the tier.
 """
 
 from __future__ import annotations

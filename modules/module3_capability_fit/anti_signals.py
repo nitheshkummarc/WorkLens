@@ -1,14 +1,13 @@
-"""Anti-signal detection (§1.3) — deterministic, vocabulary-driven.
+"""Anti-signal detection — deterministic, driven by the rubric vocabulary.
 
-Each rule maps a JD "explicitly do NOT want" pattern to a key whose penalty and
-hard-DQ flag come from the `JDProfile` (i.e. from `scoring.py`). Detection
-vocabulary comes from `data/jd_rubric.json` (`anti_signal_vocab`) and the
-consulting-company list — no terms are hardcoded here. Vocab is lowercased once
-at init (one-time setup, PHASE0 §3c).
+Each rule maps a JD "do NOT want" pattern to a key. The penalty and hard-DQ flag
+come from the JDProfile (i.e. from scoring.py); the detection keywords come from
+jd_rubric.json's anti_signal_vocab and the consulting-company list, so no terms
+are hardcoded here. The vocab is lowercased once at init.
 
-Only `research_only` is a hard DQ. `consulting_only` is a soft −0.125 penalty
-(employer is decorrelated from work content in this dataset). Total penalty is
-capped by the JDProfile cap.
+Only research_only is a hard DQ. consulting_only is a soft 0.125 penalty (the
+employer is decorrelated from the work content in this data). The total penalty is
+capped.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def _any_in(terms: tuple[str, ...], text: str) -> bool:
 
 
 class AntiSignalDetector:
-    """Detect the §1.3 anti-signals for a candidate; returns fired keys + penalty."""
+    """Detect the anti-signals for a candidate; returns fired keys + penalty."""
 
     def __init__(self, jd_profile: JDProfile, anti_signal_vocab: dict) -> None:
         self.rules = {a.key: a for a in jd_profile.anti_signals}

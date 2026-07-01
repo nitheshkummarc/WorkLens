@@ -1,8 +1,7 @@
-"""Candidate input model — mirrors `candidate_schema.json` exactly.
+"""Candidate input model — mirrors candidate_schema.json.
 
-Parsed/validated by `shared/utils/jsonl_reader` (and any direct loader), consumed
-by the scoring modules. Types are exact (interface_contract.md §1); Pydantic v2
-validates at the boundary so malformed records are caught early.
+Parsed and validated by the JSONL reader, consumed by the scoring modules.
+Validating at the boundary means malformed records are caught early.
 """
 
 from __future__ import annotations

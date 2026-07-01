@@ -1,18 +1,14 @@
-"""Match ontology phrases inside a piece of text.
+"""Find where phrases occur in a piece of text.
 
-Single responsibility: locate where phrases occur. Generic — it knows nothing
-about the AI ontology; it operates on arbitrary phrase tuples. Adapted from the
-WorkLens matcher (the same word-boundary/substring logic), plus stem handling:
+Generic: it takes arbitrary phrase tuples and knows nothing about the AI ontology.
+Matching rules:
 
-  - Short terms (≤ SHORT_TERM_MAX_LEN chars) match on word boundaries, so "rag"
-    never matches inside "storage" and "map" never matches inside "roadmap".
-  - Longer terms match as substrings, so multi-word phrases and stems survive
-    suffixes and joined text.
-  - A trailing "*" marks an explicit stem ("tokeniz*" → matches "tokenizer",
-    "tokenization") and always matches as a substring.
+  - Short terms (<= SHORT_TERM_MAX_LEN chars) match on word boundaries, so "rag"
+    doesn't match inside "storage" and "map" doesn't match inside "roadmap".
+  - Longer terms match as substrings.
+  - A trailing "*" is a stem: "tokeniz*" matches "tokenizer"/"tokenization".
 
-Patterns are compiled once and cached, so reuse across 100K candidates costs no
-recompilation (the per-candidate performance contract, PHASE0 §3c).
+Patterns compile once and are cached, so scanning 100K candidates never recompiles.
 """
 
 from __future__ import annotations

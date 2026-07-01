@@ -1,16 +1,16 @@
-"""Per-candidate reasoning (§6) — module7.
+"""Per-candidate reasoning — module7.
 
-Deterministic template, every claim pulled from the candidate's own fields /
-matched evidence phrases — no hallucination (Stage-4 check). Output varies because
-nodes, evidence snippets, ML tenure, behavioral values and concerns differ per
-candidate, and the tone tracks rank: strong candidates lead with strengths, weaker
-ones lead with the concern (Stage-4 "rank consistency").
+A deterministic template; every claim comes from the candidate's own fields or a
+matched evidence phrase, so nothing is hallucinated. Output varies because the
+nodes, evidence, ML tenure, behavioral values and concerns differ per candidate,
+and the tone follows the rank: strong candidates lead with strengths, weaker ones
+lead with the concern.
 
-Each line surfaces: title + years; up to three demonstrated strength areas (the
-lead with a concrete evidence phrase) plus applied-ML tenure when substantial; a
+Each line has: title + years; up to three demonstrated strength areas (the first
+with a concrete evidence phrase) plus applied-ML tenure when it's substantial; a
 behavioral note (recency, responsiveness, availability); and one specific, honest
-concern (a fired anti-signal, a missing/undemonstrated JD area, a logistics gap, or
-a nice-to-have gap for otherwise-complete profiles).
+concern (a fired anti-signal, a missing JD area, a long notice period, or a
+nice-to-have gap for otherwise-complete profiles).
 """
 
 from __future__ import annotations

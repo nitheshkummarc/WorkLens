@@ -1,9 +1,7 @@
-"""Load the AI capability ontology from JSON into typed `OntologyNode`s.
+"""Load the AI-capability ontology JSON into OntologyNode objects.
 
-Generic "JSON → dataclass" loader (the WorkLens `signal_loader` pattern, adapted
-to carry the `importance` field). The vocabulary itself lives entirely in the
-data file; this module embeds no domain terms. Loaded once at startup and passed
-as an immutable reference into the per-candidate path (PHASE0 §3c).
+The vocabulary lives in the data file; this loader holds no domain terms. Called
+once at startup and reused for every candidate.
 """
 
 from __future__ import annotations

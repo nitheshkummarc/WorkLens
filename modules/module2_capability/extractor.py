@@ -1,28 +1,22 @@
-"""Extract demonstrated capability (§2) → `CapabilityProfile`.
+"""Score a candidate's demonstrated capability into a CapabilityProfile.
 
-For each candidate this assigns a `node_strength ∈ {0.0, 0.5, 1.0}` to every
-ontology node, then folds them into an importance-weighted `base_capability` and
-the §1.5 `ml_relevant_months` tenure — all from one pass over the candidate text.
+Gives every ontology node a strength (0, 0.5, or 1.0), then combines them into an
+importance-weighted base_capability plus the relevant-ML tenure, in one text pass.
 
-node_strength rule (operationalizes §2; description-primary, assessment-secondary):
+Strength rules (description-primary, assessment-secondary):
 
-  1.0 (strong)  — a STRONG phrase appears in DEMONSTRATED text (career titles/
-                  descriptions), OR a skill at proficiency ≥ advanced whose
-                  assessment ≥ 50 matches the node.
-  0.5 (weak)    — a STRONG phrase appears only in CLAIMED text (summary/headline/
-                  skills, unvalidated), OR a WEAK/ambiguous phrase appears in
-                  DEMONSTRATED text (real work but ambiguous wording).
-  0.0 (none)    — no evidence, or only a weak/ambiguous phrase in claimed text
-                  (the keyword-stuffer signature → no credit).
+  1.0  a strong phrase in demonstrated text (career titles/descriptions), or a
+       skill at advanced/expert whose assessment is >= 50.
+  0.5  a strong phrase only in claimed text (summary/headline/skills), or a
+       weak/ambiguous phrase in demonstrated text.
+  0.0  no evidence, or only a weak phrase in claimed text (the stuffer signature).
 
-  Precision note: requiring a STRONG phrase for the 1.0 demonstrated case (rather
-  than any phrase) is what stops ambiguous terms like "search"/"data" in a
-  backend description from registering as full AI capability — §2's "single most
-  important precision lever". Skills failing the <30 assessment gate are dropped
-  before any matching (stuffing guard).
+Requiring a strong phrase for the 1.0 case is what stops vague words like "search"
+or "data" in a non-AI description from counting as real AI capability. Skills that
+fail the <30 assessment gate are dropped before matching.
 
-The extractor precomputes its derived structures once (importance sum, the N1–N7
-ML-phrase set) so the per-candidate path does no setup (PHASE0 §3c).
+Derived structures (importance sum, the N1-N7 ML-phrase set) are built once, so
+the per-candidate path does no setup.
 """
 
 from __future__ import annotations
@@ -38,8 +32,8 @@ from shared.utils.text_fields import (
     demonstrated_text,
 )
 
-# §1.5 — the genuine applied-ML/AI nodes. N8 (data-eng) and N9 (scale-infra)
-# alone do NOT count a role as "applied ML".
+# the genuine applied-ML/AI nodes. N8 (data-eng) and N9 (scale-infra) alone do
+# NOT count a role as "applied ML".
 _ML_NODE_COUNT = 7  # N1..N7
 
 _STRONG_PROFICIENCIES = ("advanced", "expert")
@@ -86,7 +80,7 @@ class CapabilityExtractor:
             return NodeEvidence(node=node.name, strength=1.0,
                                 source="career_description", evidence_phrase=phrase)
 
-        # 1.0 — a validated skill (advanced/expert + assessment ≥ 50) matching the node.
+        # 1.0: a validated skill (advanced/expert with assessment >= 50) matching the node.
         node_phrases = self.all_phrase_groups[node.name]
         for skill in kept_skills:
             if (skill.proficiency in _STRONG_PROFICIENCIES
@@ -110,7 +104,7 @@ class CapabilityExtractor:
         # 0.0 — nothing, or only a weak phrase in claimed text (stuffer signature).
         return NodeEvidence(node=node.name, strength=0.0, source="none", evidence_phrase=None)
 
-    # -- §1.5 ML tenure ------------------------------------------------------
+    # -- ML tenure -----------------------------------------------------------
     def _ml_relevant_months(self, candidate: Candidate) -> int:
         total = 0
         for entry in candidate.career_history:

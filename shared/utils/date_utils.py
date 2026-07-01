@@ -1,8 +1,8 @@
-"""Date math for recency scoring — deterministic, AS_OF-relative.
+"""Date math for recency scoring.
 
-ISO dates only (the schema guarantees "YYYY-MM-DD"). All recency is measured
-against the run's AS_OF date (the dataset's max last_active_date), never the wall
-clock, so runs are reproducible (interface_contract.md §6/§11).
+ISO dates only (the schema guarantees YYYY-MM-DD). Recency is measured against the
+run's AS_OF date (the dataset's latest last_active_date), never the wall clock, so
+runs are reproducible.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ def days_between(start_iso: str, end_iso: str) -> int:
 
 
 def days_since(when_iso: str, as_of_iso: str) -> int:
-    """Days from `when` up to AS_OF, floored at 0 (future activity → 0 days old)."""
+    """Days from `when` up to AS_OF, floored at 0 (future activity counts as 0)."""
     return max(0, days_between(when_iso, as_of_iso))
 
 

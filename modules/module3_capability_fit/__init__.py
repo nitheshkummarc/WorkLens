@@ -1,4 +1,4 @@
-"""module3_capability_fit — §1 rubric adjustments + §0 capability_fit."""
+"""Apply rubric adjustments and assemble the capability_fit score."""
 
 from __future__ import annotations
 

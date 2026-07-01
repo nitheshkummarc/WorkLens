@@ -1,14 +1,14 @@
-"""Behavioral multiplier (§3) — module4.
+"""Behavioral multiplier — module4.
 
-Turns the 23 `redrob_signals` into 8 weighted sub-scores → `behavioral_raw` →
-`behavioral_multiplier = 0.50 + 0.50·raw ∈ [0.50, 1.00]`. Behavior is a
-*modifier* on capability, never the driver: a fully unavailable candidate is
-halved, not eliminated (the floor), and a strong-but-stale candidate can fall
-below an available twin — intended per the JD's "down-weight the unavailable".
+Turns the 23 redrob_signals into 8 weighted sub-scores, then
+behavioral_multiplier = 0.50 + 0.50 * behavioral_raw, in [0.50, 1.00]. Behaviour
+modifies capability, it never drives it: a fully unavailable candidate is halved
+(the floor), not dropped, and a strong-but-stale candidate can fall below an
+available twin — the JD's "down-weight the unavailable".
 
-All weights/tables come from `shared/config/scoring.py`; logistics city buckets
-come from `data/jd_rubric.json`. `-1` sentinels and missing values map to neutral
-(§3.3: absence ≠ negative). Recency is measured against AS_OF, not the clock.
+Weights and tables come from scoring.py; the logistics city buckets come from
+jd_rubric.json. `-1` sentinels and missing values map to neutral (absence is not a
+negative). Recency is measured against AS_OF, not the clock.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ def _band(value: float, bands: tuple[tuple[float, float], ...], default: float) 
 
 
 def _lognorm(value: float, cap: float) -> float:
-    """log1p-normalized count, saturating at `cap` → [0, 1]."""
+    """log1p-normalized count, saturating at `cap`, in [0, 1]."""
     return _clamp01(math.log1p(min(value, cap)) / math.log1p(cap))
 
 
@@ -50,7 +50,7 @@ class BehavioralScorer:
         self.office_cities = tuple(c.lower() for c in logistics_buckets["office"])
         self.welcome_cities = tuple(c.lower() for c in logistics_buckets["welcome"])
 
-    # -- logistics sub-factors (§3.2) ---------------------------------------
+    # -- logistics sub-factors -----------------------------------------------
     def _location_factor(self, candidate: Candidate) -> float:
         location = candidate.profile.location.lower()
         country = candidate.profile.country.lower()

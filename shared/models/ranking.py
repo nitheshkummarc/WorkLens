@@ -1,8 +1,7 @@
-"""Ranking result models (§0 final + §5) — output of module6_ranking.
+"""Ranking results — output of module6.
 
-Sole owner of `final_score` and `rank`. `RankedCandidate` is the thin top-100
-projection; the rich per-candidate payload needed for reasoning is carried by
-module6's internal `RankedEntry`. Mirrors interface_contract.md §8.
+RankedCandidate is the thin top-100 record (id, rank, score). The richer
+per-candidate payload used for reasoning is carried by module6's RankedEntry.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ class CandidateScore(BaseModel):
     capability_fit: float
     behavioral_multiplier: float
     is_honeypot: bool
-    final_score: float          # 0.0 if honeypot else capability_fit · multiplier
+    final_score: float          # 0.0 if honeypot else capability_fit * multiplier
 
 
 class RankedCandidate(BaseModel):

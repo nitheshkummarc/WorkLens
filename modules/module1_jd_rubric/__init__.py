@@ -1,4 +1,4 @@
-"""module1_jd_rubric — build the JDProfile (§1) once per run."""
+"""Build the JD rubric — one JDProfile per run."""
 
 from __future__ import annotations
 

@@ -1,12 +1,12 @@
-"""Stream-read and validate `candidates.jsonl` (interface_contract.md §1a).
+"""Stream and validate candidates.jsonl.
 
-Yields validated `Candidate` objects one at a time (constant memory over the
-~465 MB / 100K-row pool) and, as a side effect of iteration, accumulates the set
-of all valid candidate ids seen. That `pool_ids` set is threaded into module8 so
-its "every top-100 id exists in the pool" check is a real membership test.
+Yields one validated Candidate at a time (constant memory over the ~465 MB pool)
+and, while iterating, collects the set of all candidate ids seen. That pool_ids
+set is passed to module8 so its "every top-100 id exists in the pool" check is a
+real membership test.
 
-Robustness: a single malformed/invalid line is skipped (warned, counted) — never
-fatal. Only catastrophic I/O (unreadable file) aborts the run.
+A single malformed line is skipped (warned + counted), never fatal; only an
+unreadable file aborts the run.
 """
 
 from __future__ import annotations

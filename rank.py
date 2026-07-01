@@ -1,10 +1,10 @@
-"""WorkLens-RedRob entrypoint — candidates.jsonl + JD → submission.csv.
+"""WorkLens-RedRob entrypoint: candidates.jsonl + JD to submission.csv.
 
-Single streaming pass over the 100K pool: each candidate is scored through
-modules 2–5, fed into the module6 bounded top-K heap, and only the retained 100
-get module7 reasoning. Module8 re-validates the rows (hard gate) before writing.
+One streaming pass over the 100K pool: each candidate is scored through modules 2-5,
+fed into the module6 bounded top-K heap, and only the retained 100 get module7
+reasoning. Module8 re-validates the rows (the hard gate) before writing.
 
-Reproduce command (Stage-3):
+Reproduce:
     python rank.py --candidates ./candidates.jsonl --out ./submission.csv
 """
 

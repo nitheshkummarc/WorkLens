@@ -1,4 +1,4 @@
-"""module6_ranking — §0 final score + §5 streaming Top-K selection."""
+"""Compute the final score and pick the top 100 with a streaming heap."""
 
 from __future__ import annotations
 

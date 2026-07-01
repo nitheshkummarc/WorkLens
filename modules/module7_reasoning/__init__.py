@@ -1,4 +1,4 @@
-"""module7_reasoning — §6 per-candidate justification string."""
+"""Build the per-candidate reasoning string."""
 
 from __future__ import annotations
 

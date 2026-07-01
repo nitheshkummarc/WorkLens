@@ -1,10 +1,9 @@
-"""Final-output validation (§6) — module8's HARD GATE.
+"""Final-output validation — module8's hard gate.
 
-Independently re-checks the produced rows against every `validate_submission.py`
-rule (it does not trust construction), plus two checks the official validator
-can't do alone: real pool membership and the "scores not all identical" guard
-(spec §6 "model isn't differentiating"). `rank.py` aborts with a non-zero exit if
-`validate` returns any error — no invalid CSV is ever accepted as success.
+Re-checks the produced rows against every rule in the official validate_submission.py
+(it doesn't trust construction), plus two checks that validator can't do alone:
+real pool membership and a "scores not all identical" guard. rank.py exits non-zero
+if validate returns any error, so an invalid CSV is never treated as success.
 """
 
 from __future__ import annotations
@@ -57,7 +56,7 @@ class SubmissionValidator:
         if missing:
             errors.append(f"missing ranks: {sorted(missing)}")
 
-        # score non-increasing by rank + equal-score → candidate_id ascending
+        # score non-increasing by rank, and equal scores must be candidate_id ascending
         by_rank = sorted(rows, key=lambda r: r.rank)
         for a, b in zip(by_rank, by_rank[1:]):
             if a.score < b.score:
@@ -70,11 +69,11 @@ class SubmissionValidator:
                     f"{a.candidate_id} > {b.candidate_id}"
                 )
 
-        # spec §6: a model that isn't differentiating sets every score identical
+        # a model that isn't differentiating gives every candidate the same score
         if rows and len({r.score for r in rows}) == 1:
             errors.append("all scores identical — model is not differentiating")
 
-        # reasoning present (Stage-4: empty reasoning is penalized)
+        # reasoning must be present (empty reasoning is penalized at manual review)
         for r in rows:
             if not r.reasoning.strip():
                 errors.append(f"empty reasoning at rank {r.rank}")

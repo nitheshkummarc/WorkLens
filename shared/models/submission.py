@@ -1,7 +1,6 @@
-"""CSV submission row model (§6) — output of module8_submission.
+"""One CSV row — output of module8.
 
-The emitted CSV header (exact order) is `candidate_id,rank,score,reasoning`,
-UTF-8, header + exactly 100 data rows. Mirrors interface_contract.md §9.
+The CSV has header candidate_id,rank,score,reasoning (UTF-8) plus exactly 100 rows.
 """
 
 from __future__ import annotations

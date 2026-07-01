@@ -1,4 +1,4 @@
-"""module8_submission — §6 CSV serialization + final-output validation gate."""
+"""Write the submission CSV and validate it (the hard gate)."""
 
 from __future__ import annotations
 

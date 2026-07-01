@@ -1,19 +1,18 @@
-"""Impossibility detection (§4) — module5.
+"""Impossibility detection — module5.
 
-Flags *provably impossible* profiles only, with two disjoint rules validated at
-0.043% of the public pool (well under the spec's ~0.08%, and far under the
->10%-in-top-100 DQ — it intentionally under-flags, the safe direction):
+Flags only provably-impossible profiles, with two rules that fire on 0.043% of the
+pool (well under the spec's ~0.08% and far under the >10%-in-top-100 DQ — it
+under-flags on purpose, which is the safe side):
 
-  H1 — expert-but-unused cluster: ≥3 skills at proficiency advanced/expert with
-       `duration_months == 0` (the spec's own "expert in skills with 0 years used").
-  H2 — tenure exceeds working life: Σ career duration_months >
-       years_of_experience·12·1.5 + 12 (generous slack for overlapping roles;
-       only the genuinely impossible trips it).
+  H1  expert-but-unused: >=3 skills at advanced/expert with duration_months == 0
+      (the spec's own "expert in skills with 0 years used").
+  H2  tenure exceeds working life: total career months >
+      years_of_experience * 12 * 1.5 + 12 (slack for overlapping roles; only the
+      genuinely impossible trips it).
 
-A honeypot is forced to relevance tier 0 downstream (module6 sets final = 0.0).
-This is reserved for impossibility — a keyword-stuffer with a wrong title is NOT
-a honeypot; it is sunk naturally by §2 (non-ML descriptions) + §1.3 anti-signals.
-Thresholds live in `shared/config/scoring.py`; nothing is hardcoded here.
+A honeypot is forced to a final score of 0 in module6. This is for impossibility
+only — a keyword-stuffer with the wrong title is NOT a honeypot; module2 and the
+anti-signals sink that naturally. Thresholds live in scoring.py.
 """
 
 from __future__ import annotations

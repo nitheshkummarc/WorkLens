@@ -1,21 +1,19 @@
-"""Final score + streaming Top-K selection (§0 final, §5) — module6.
+"""Final score + streaming top-K selection — module6.
 
-Computes `final = 0.0 if honeypot else capability_fit · behavioral_multiplier`
-and keeps the top 100 with a **bounded min-heap** (size K=100) over the 100K
-stream — O(N log K) time, O(K) memory. It MUST NOT materialize all 100K scores
-and full-sort (PHASE0 §3a).
+final = 0.0 if honeypot else capability_fit * behavioral_multiplier. The top 100
+are kept with a bounded min-heap (size 100) over the stream — O(N log K) time,
+O(K) memory. It does not collect all 100K scores and full-sort.
 
-Heap element: `(final, -candidate_num, Candidate, CapabilityProfile, CapabilityFit,
-BehavioralProfile, HoneypotAnalysis)` with `candidate_num = int(candidate_id[5:])`.
-The leading pair `(final, -candidate_num)` is unique (ids are unique), so heapq
-never compares the trailing Pydantic objects — carrying them lets module7 run on
-the retained 100 with no second pass. Eviction drops the lowest score and, on a
-score tie, the **highest** id — so the smaller id is retained, matching the
-final tie-break (candidate_id ascending).
+Heap element: (final, -candidate_num, Candidate, CapabilityProfile, CapabilityFit,
+BehavioralProfile, HoneypotAnalysis) with candidate_num = int(candidate_id[5:]).
+The leading (final, -candidate_num) pair is unique, so heapq never compares the
+trailing Pydantic objects — carrying them lets module7 run on the retained 100
+with no second pass. On a score tie the eviction drops the higher id, so the
+smaller id is kept (matching the id-ascending tie-break).
 
-After the stream, the retained 100 are sorted by `(round(final,6) DESC,
-candidate_id ASC)` to assign ranks 1..100 and the emitted `score = round(final,6)`.
-This makes the CSV satisfy the validator (non-increasing score; equal score →
+After the stream the retained 100 are sorted by (round(final,6) desc,
+candidate_id asc) to assign ranks 1..100, and the emitted score is round(final,6).
+This makes the CSV satisfy the validator (non-increasing score; equal score means
 id ascending) by construction.
 """
 
@@ -54,7 +52,7 @@ class RankedEntry:
 
 
 def final_score(fit: CapabilityFit, behavioral: BehavioralProfile, honeypot: HoneypotAnalysis) -> float:
-    """§0: honeypots sink to 0.0; otherwise capability_fit rescaled by behavior."""
+    """Honeypots sink to 0.0; otherwise capability_fit is rescaled by behaviour."""
     if honeypot.is_honeypot:
         return 0.0
     return fit.capability_fit * behavioral.behavioral_multiplier

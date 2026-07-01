@@ -1,15 +1,14 @@
-"""Assemble candidate text blobs for phrase matching (§2 source separation).
+"""Build the two text blobs module2 matches against.
 
-The single most important precision lever in §2 is *where* evidence appears:
+What matters for scoring is *where* the evidence is:
 
-  - DEMONSTRATED  = current_title + every career_history title/description.
-    Work actually described in employment history → can earn strong (1.0).
-  - CLAIMED       = summary + headline + skill names. Self-asserted, not
-    demonstrated → capped at weak (0.5) unless an assessment validates it.
+  - demonstrated = current title + all career titles/descriptions. Work someone
+    actually did, so it can earn full (1.0) credit.
+  - claimed = summary + headline + skill names. Self-asserted, so it's capped at
+    half (0.5) unless an assessment backs it up.
 
-Keeping these separate is what lets a plain-language "built a recommendation
-system" score strong while a keyword-stuffed skill list is discounted. This
-module only *assembles* text; it applies no scoring rules.
+Splitting them is what lets "built a recommendation system" score strong while a
+stuffed skills list is discounted. This module only builds text; it scores nothing.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ def claimed_text(candidate: Candidate, kept_skills: list[Skill]) -> str:
 
 
 def career_entry_text(entry: CareerEntry) -> str:
-    """title + description for one role (used for §1.5 per-role ML-relevance)."""
+    """title + description for one role (used to tag ML-relevant roles)."""
     return f"{entry.title}{_SEP}{entry.description}"
 
 

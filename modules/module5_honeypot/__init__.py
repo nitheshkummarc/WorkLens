@@ -1,4 +1,4 @@
-"""module5_honeypot — §4 impossibility detection (H1/H2)."""
+"""Detect impossible (honeypot) profiles with rules H1 and H2."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""module4_behavioral — §3 behavioral sub-scores + multiplier."""
+"""Turn the behavioral signals into sub-scores and a multiplier."""
 
 from __future__ import annotations
 

@@ -1,13 +1,12 @@
-"""Assemble `CapabilityFit` (§1 adjustments + §0 capability_fit) — module3.
+"""Assemble the CapabilityFit — module3.
 
-Combines module2's `base_capability` with the §1.3 anti-penalty, §1.4 experience
-factor, §1.5 ML-depth factor, and §1.2 nice-to-have bonus into the frozen
-capability_fit equation:
+Combines module2's base_capability with the anti-signal penalty, experience factor,
+ML-depth factor, and nice-to-have bonus:
 
-    capability_fit = clamp01( min(base, 0.30 if hard_dq) · E · D − anti + nice )
+    capability_fit = clamp01( min(base, 0.30 if hard_dq) * E * D - anti + nice )
 
-`ml_depth_factor` is multiplicative (∈ [0.85, 1.10]) so it only re-orders
-already-capable candidates; setting it to 1.0 reproduces v1.
+ml_depth_factor is a multiplier in [0.85, 1.10], so it only re-orders candidates
+who already have a real base; setting it to 1.0 turns it off.
 """
 
 from __future__ import annotations
@@ -35,14 +34,14 @@ class CapabilityFitAssembler:
         self.nice_nodes = set(jd_profile.nice_to_have_nodes)
         self.hard_dq_ceiling = jd_profile.hard_dq_base_ceiling
 
-    # -- §1.4 ----------------------------------------------------------------
+    # -- experience factor ---------------------------------------------------
     def _experience_factor(self, years: float) -> float:
         for band in self.bands:
             if band.lo <= years < band.hi:
                 return band.factor
         return self.bands[-1].factor
 
-    # -- §1.5 ----------------------------------------------------------------
+    # -- ML-depth factor -----------------------------------------------------
     @staticmethod
     def _ml_depth_factor(ml_months: int, base_capability: float) -> float:
         years = ml_months / 12.0
@@ -52,12 +51,12 @@ class CapabilityFitAssembler:
             return scoring.ML_DEPTH_FACTOR_SOLID
         if years >= scoring.ML_DEPTH_YEARS_SHALLOW:
             return scoring.ML_DEPTH_FACTOR_SHALLOW
-        # < 1 year of ML tenure
+        # under 1 year of ML tenure
         if base_capability > 0:
-            return scoring.ML_DEPTH_FACTOR_PIVOT   # AI signal but ~no ML career → recent pivot
-        return scoring.ML_DEPTH_FACTOR_NONE        # no ML at all → neutral (don't double-punish)
+            return scoring.ML_DEPTH_FACTOR_PIVOT   # AI signal but almost no ML career (recent pivot)
+        return scoring.ML_DEPTH_FACTOR_NONE        # no ML at all - stay neutral, don't double-punish
 
-    # -- §1.2 ----------------------------------------------------------------
+    # -- nice-to-have bonus --------------------------------------------------
     def _nice(self, capability: CapabilityProfile) -> tuple[list[str], float]:
         items = [
             ev.node for ev in capability.node_strengths

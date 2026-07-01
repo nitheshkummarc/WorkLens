@@ -1,7 +1,7 @@
-"""Capability profile model (§2) — output of module2_capability.
+"""Capability profile — output of module2.
 
-Owns `node_strengths`, `base_capability`, and `ml_relevant_months`. Consumed by
-module3 (fit) and module7 (reasoning). Mirrors interface_contract.md §4.
+Holds the per-node strengths, the importance-weighted base_capability, and the
+relevant-ML tenure. Consumed by module3 and module7.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ class NodeEvidence(BaseModel):
 class CapabilityProfile(BaseModel):
     candidate_id: str
     node_strengths: list[NodeEvidence]              # one per ontology node (all 9 present)
-    base_capability: float = Field(ge=0, le=1)      # Σ(importance·strength)/Σ importance
-    ml_relevant_months: int = Field(ge=0)           # §1.5 — Σ duration_months of N1–N7 roles
+    base_capability: float = Field(ge=0, le=1)      # importance-weighted mean of strengths
+    ml_relevant_months: int = Field(ge=0)           # months in ML-relevant roles (nodes N1-N7)
 
 
 __all__ = ["NodeEvidence", "CapabilityProfile"]

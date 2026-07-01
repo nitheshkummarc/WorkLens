@@ -1,8 +1,8 @@
-"""Behavioral profile model (§3) — output of module4.
+"""Behavioral profile — output of module4.
 
-Owns the 8 sub-scores, `behavioral_raw`, and `behavioral_multiplier`. Consumed by
-module6 (ranking) and module7 (reasoning). Mirrors interface_contract.md §6.
-Recency is measured against the RunConfig AS_OF date, never the wall clock.
+The 8 sub-scores, behavioral_raw, and behavioral_multiplier. Consumed by module6
+(ranking) and module7 (reasoning). Recency is measured against the AS_OF date, not
+the wall clock, so runs are reproducible.
 """
 
 from __future__ import annotations
