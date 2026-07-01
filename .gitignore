@@ -23,3 +23,8 @@ candidates.jsonl
 .DS_Store
 .idea/
 .vscode/
+
+# Local design/interview docs — kept in the workspace, NOT pushed to the repo
+docs/DEFENSE_NOTES.md
+docs/PHASE0_ARCHITECTURE.md
+docs/interface_contract.md

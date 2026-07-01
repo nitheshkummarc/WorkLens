@@ -1,0 +1,99 @@
+# Redrob Hackathon — Submission Metadata Template
+#
+# Copy this file to your repo root as `submission_metadata.yaml` and fill it in.
+# The fields here should match what you submit via the portal at upload time.
+# Stage 3 review uses this file to verify your portal metadata.
+
+# ============================================================================
+# Team identity
+# ============================================================================
+team_name: "Error Builders"  # Used in leaderboard and announcements
+
+primary_contact:
+  name: "Nitheshkummar C"
+  email: "nitheshkummarni@gmail.com"   
+  phone: "+91-9442209542"        
+
+team_members:
+  - name: "Nitheshkummar C"
+    email: "nitheshkummarni@gmail.com"
+    role: "Scoring core & pipeline — JD rubric, capability, honeypot, submission validation, orchestration, tests"   # github: nitheshkummarc
+  - name: "Sakthi Sri Kumaran"
+    email: "sakthisrikumaran006@gmail.com"
+    role: "Ranking & signals — capability-fit, behavioral scoring, top-K ranking, reasoning"   # github: Sakthi0616
+
+# ============================================================================
+# Code and reproducibility
+# ============================================================================
+github_repo: "https://github.com/nitheshkummarc/WorkLens"
+# Required. Must be reachable. Private repos OK if you can grant organizer
+# access at Stage 3 (the email to add will be communicated then).
+
+sandbox_link: "https://huggingface.co/spaces/nitheshkummar/redrob"
+# Required. A working hosted environment where the ranker can be run on a small
+# candidate sample. See Section 10.5 of submission_spec.md for acceptable
+# platforms (HuggingFace Spaces, Streamlit Cloud, Replit, Colab, Docker, Binder).
+
+reproduce_command: "python rank.py --candidates ./candidates.jsonl --out ./submission.csv"
+# The single command that produces submission.csv from candidates.jsonl.
+# Should run end-to-end within 5 minutes on CPU with 16GB RAM and no network.
+
+# ============================================================================
+# Compute environment
+# ============================================================================
+compute:
+  platform: "Local Windows 11 laptop"           # Or: "AWS EC2 c5.4xlarge", "Local Linux box", etc.
+  cpu_cores: 1                                  # single-threaded streaming pass
+  ram_gb: 16                                    # Available RAM in GB
+  python_version: "3.12.4"                      # python --version
+  os: "Windows 11"                              # Or "Ubuntu 22.04 LTS", etc.
+  uses_gpu_for_inference: false                 # Must be false — see compute constraints
+  has_network_during_ranking: false             # Must be false — no API calls during ranking
+  pre_computation_required: false               # true if you pre-compute embeddings or train models offline
+  pre_computation_time_minutes: 0               # Approximate, if applicable
+
+# ============================================================================
+# AI tools declaration
+# ============================================================================
+# Transparency only — declared use is NOT penalized. Be honest. Stage 5 interview
+# may verify these declarations against your code; declarations that contradict
+# your code or your interview are flagged.
+ai_tools_used:
+  - "Claude"        # architecture discussion, code review, profiling analysis, test scaffolding
+  - "ChatGPT"       # debugging / general assistance
+
+ai_usage_summary: |
+  Used Claude and ChatGPT as development assistants for architecture discussion, code
+  review, profiling/optimization analysis, debugging, and test scaffolding. The
+  engineering decisions, scoring design, and calibration are the team's own. No
+  candidate data was sent to any LLM, and the ranking code makes no LLM or network calls.
+
+# ============================================================================
+# Approach summary (optional but recommended)
+# ============================================================================
+methodology_summary: |
+  Deterministic, CPU-only rule-based ranker — no ML model, embeddings, or network.
+  The JD is encoded as nine weighted capability areas. Per candidate we (1) score
+  demonstrated capability from career-history text using a curated phrase matcher —
+  not a skills-list count, which is what defeats keyword-stuffers; (2) adjust it by an
+  experience band, applied-ML tenure, JD anti-signals, and a nice-to-have bonus to get
+  capability_fit; (3) compute a 0.5-1.0 behavioral multiplier from 14 engagement
+  signals (recency, responsiveness, availability, logistics, trust); (4) force
+  provably-impossible "honeypot" profiles to zero. final = honeypot ? 0 :
+  capability_fit * behavioral_multiplier. The top 100 are selected with a streaming
+  bounded min-heap (O(N log K) time, O(K) memory); each then gets a fact-grounded
+  one-line reason (no hallucination), and a hard validator re-checks the CSV before
+  writing. Runs the full 100K pool in ~2 minutes on CPU, is byte-identical across
+  reruns, and passes the official validator with 0 honeypots in the top 100. The phrase
+  matcher was profiled and optimized (6.7x faster). Ranking is robust to +/-15%
+  constant mis-calibration (top-10 ~97% stable). See docs/METHODOLOGY.md.
+
+# ============================================================================
+# Declarations
+# ============================================================================
+declarations:
+  read_submission_spec: true        # I have read submission_spec.md in full
+  code_is_original_work: true       # My code is my team's original work (using AI as a tool is fine)
+  no_collusion: true                # I have not coordinated my submission with other teams
+  honeypot_check_done: true         # explicit H1/H2 detection; 0 honeypots in top-100
+  reproduction_tested: true         # full 100K run + official validator + byte-identical re-run
