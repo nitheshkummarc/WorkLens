@@ -10,9 +10,10 @@ duplication; all tunables in config; per-module README + tests. **No hard
 line ceiling** — files may exceed 300 lines if doing one job well, but length is
 never a reason to merge responsibilities (judge-readable in <1 min = the test).
 
-> **STATUS: PHASE 0 — DOCS ONLY.** No implementation code, module files, or
-> placeholder classes exist yet. The folder tree below is the *plan*; only
-> `docs/` exists at this point.
+> **STATUS: IMPLEMENTED.** This package was the pre-implementation plan; the system
+> described below is now built (modules 1–8, shared config/models/utils, `rank.py`,
+> tests, sandbox). The folder tree and module plan match the implementation. See
+> `README.md` for how to run it and `DEFENSE_NOTES.md` for design rationale.
 
 ---
 

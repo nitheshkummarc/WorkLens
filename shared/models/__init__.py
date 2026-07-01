@@ -1,8 +1,8 @@
 """Pydantic schemas for WorkLens-RedRob (interface_contract.md).
 
-Covers the capability + behavioral + honeypot scoring path (candidate input,
-ontology, JD rubric, capability profile, capability fit, behavioral profile,
-honeypot analysis). Ranking and submission models are added as their modules land.
+Covers the full scoring path (candidate input, ontology, JD rubric, capability
+profile, capability fit, behavioral profile, honeypot analysis, ranking result,
+submission row).
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ from .jd_profile import (
     AntiSignalRule, CapabilityRequirement, ExperienceBand, JDProfile,
 )
 from .ontology import OntologyNode
+from .ranking import CandidateScore, RankedCandidate
+from .submission import SubmissionRow
 
 __all__ = [
     # candidate
@@ -36,4 +38,8 @@ __all__ = [
     "BehavioralProfile",
     # honeypot (module5)
     "HoneypotAnalysis",
+    # ranking (module6)
+    "CandidateScore", "RankedCandidate",
+    # submission (module8)
+    "SubmissionRow",
 ]

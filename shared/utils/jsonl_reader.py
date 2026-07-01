@@ -11,10 +11,12 @@ fatal. Only catastrophic I/O (unreadable file) aborts the run.
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TextIO
 
 from shared.models.candidate import Candidate
 
@@ -24,8 +26,10 @@ logger = logging.getLogger(__name__)
 class CandidateReader:
     """Iterable over a JSONL candidate file; exposes pool ids + skip count.
 
-    `pool_ids` and `skipped_records` fill in *as the stream is consumed*, so read
-    them after iteration completes.
+    Accepts either a plain `.jsonl` or a gzipped `.jsonl.gz` file (the bundle
+    ships the pool gzipped) — the format is chosen from the suffix, so the same
+    reproduce command works on either. `pool_ids` and `skipped_records` fill in
+    *as the stream is consumed*, so read them after iteration completes.
     """
 
     def __init__(self, path: Path | str) -> None:
@@ -33,8 +37,14 @@ class CandidateReader:
         self.pool_ids: set[str] = set()
         self.skipped_records: int = 0
 
+    def _open(self) -> TextIO:
+        """Open as UTF-8 text, transparently decompressing a `.gz` file."""
+        if self.path.suffix == ".gz":
+            return gzip.open(self.path, mode="rt", encoding="utf-8")
+        return self.path.open(encoding="utf-8")
+
     def __iter__(self) -> Iterator[Candidate]:
-        with self.path.open(encoding="utf-8") as handle:
+        with self._open() as handle:
             for line_no, line in enumerate(handle, start=1):
                 line = line.strip()
                 if not line:
