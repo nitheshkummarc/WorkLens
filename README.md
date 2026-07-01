@@ -42,7 +42,7 @@ python validate_submission.py submission.csv
 ## Reproducing the submission (Stage 3)
 
 - **One command**, shown above, turns the candidate file into the CSV — no hidden steps or
-  manual edits. Name the output : `--out ./<team-name>.csv`.
+  manual edits. Name the output : `--out ./submission.csv`.
 - **No pre-computation** — no embeddings, indexes, or model weights; the only inputs are the
   two committed files under `data/`, so there's nothing to build first.
 - **Dependencies:** `requirements.txt` (only `pydantic` at ranking time; `pytest` for tests).
