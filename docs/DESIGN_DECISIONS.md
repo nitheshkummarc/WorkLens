@@ -1,4 +1,4 @@
-# Defense Notes
+# DESIGN_DECISIONS
 
 Why the system is built the way it is — per module, with the alternatives we
 considered and why we rejected them. Written for the Stage-5 "defend your work"
