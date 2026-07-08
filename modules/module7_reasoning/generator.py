@@ -1,16 +1,16 @@
-"""Per-candidate reasoning — module7.
+"""Per-candidate reasoning — module 7.
 
-A deterministic template; every claim comes from the candidate's own fields or a
-matched evidence phrase, so nothing is hallucinated. Output varies because the
-nodes, evidence, ML tenure, behavioral values and concerns differ per candidate,
-and the tone follows the rank: strong candidates lead with strengths, weaker ones
-lead with the concern.
+A deterministic template engine: every claim is derived from the candidate's own
+fields or a matched evidence phrase, ensuring factual grounding. Output varies
+because the capability nodes, evidence, tenure, behavioral values, and concerns
+differ per candidate. The tone follows the rank: top candidates lead with
+strengths, lower-ranked candidates lead with the primary concern.
 
-Each line has: title + years; up to three demonstrated strength areas (the first
-with a concrete evidence phrase) plus applied-ML tenure when it's substantial; a
-behavioral note (recency, responsiveness, availability); and one specific, honest
-concern (a fired anti-signal, a missing JD area, a long notice period, or a
-nice-to-have gap for otherwise-complete profiles).
+Each line includes: title + years; up to three demonstrated strength areas (the
+first with a concrete evidence phrase) plus domain tenure when substantial; a
+behavioral note (recency, responsiveness, availability); and one specific concern
+(a fired anti-signal, a missing capability area, a long notice period, or a
+supplementary gap for otherwise-complete profiles).
 """
 
 from __future__ import annotations

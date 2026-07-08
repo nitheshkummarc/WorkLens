@@ -1,11 +1,12 @@
-"""WorkLens-RedRob entrypoint: candidates.jsonl + JD to submission.csv.
+"""WorkLens entrypoint — streaming candidate ranking pipeline.
 
-One streaming pass over the 100K pool: each candidate is scored through modules 2-5,
-fed into the module6 bounded top-K heap, and only the retained 100 get module7
-reasoning. Module8 re-validates the rows (the hard gate) before writing.
+Performs a single pass over the candidate pool: each record is scored through
+modules 2–5, inserted into the module 6 bounded top-K heap, and only the
+retained top-K candidates receive module 7 reasoning. Module 8 re-validates
+the output rows (hard gate) before writing the final CSV.
 
-Reproduce:
-    python rank.py --candidates ./candidates.jsonl --out ./submission.csv
+Usage:
+    python rank.py --candidates ./candidates.jsonl --out ./output.csv
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ logger = logging.getLogger("rank")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Rank the top-100 candidates for the Senior AI Engineer JD.")
+    p = argparse.ArgumentParser(description="Rank candidates against a job specification and produce a scored CSV.")
     p.add_argument("--candidates", required=True, type=Path, help="path to candidates.jsonl")
     p.add_argument("--out", type=Path, default=paths.DEFAULT_OUTPUT_PATH, help="output submission CSV path")
     p.add_argument("--ontology", type=Path, default=paths.ONTOLOGY_PATH)

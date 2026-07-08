@@ -10,21 +10,38 @@ __pycache__/
 venv/
 env/
 
-# Generated submission output (reproduced from rank.py, never committed)
+# Generated output (reproduced from rank.py, never committed)
 outputs/
 *.csv
 
-# Dataset — ~465 MB candidate pool, NEVER committed (read via --candidates path)
+# Dataset — large candidate pool, never committed (read via --candidates path)
 dataset/
 candidates.jsonl
 *.jsonl
+
+# Environment and local config
+.env
 
 # OS / editor
 .DS_Store
 .idea/
 .vscode/
 
-# Local design/interview docs — kept in the workspace, NOT pushed to the repo
-docs/DEFENSE_NOTES.md
+# Docker
+docker-compose.override.yml
+
+# Hackathon artifacts (not part of the public release)
+submission_metadata.yaml
+Error_builders.xlsx
+team_error_builders.pdf
+docs.zip
+submission.xlsx
+
 docs/PHASE0_ARCHITECTURE.md
 docs/interface_contract.md
+docs/INTERVIEW_GUIDE.md
+docs/INTERVIEW_NITHESH.md
+docs/INTERVIEW_SAKTHI.md
+docs/TESTS.md
+docs/PHASE1B_OPTIMIZATION_DESIGN.md
+docs/ONTOLOGY.md

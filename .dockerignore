@@ -1,0 +1,36 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+
+# Documentation and tests (not needed at runtime)
+docs/
+tests/
+*.md
+LICENSE
+
+# Large data files
+candidates.jsonl
+*.jsonl
+*.jsonl.gz
+
+# Generated outputs
+outputs/
+*.csv
+
+# Hackathon artifacts
+submission_metadata.yaml
+Error_builders.xlsx
+team_error_builders.pdf
+docs.zip
+submission.xlsx
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+.env
