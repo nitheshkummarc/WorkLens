@@ -1,8 +1,4 @@
-"""Load the AI-capability ontology JSON into OntologyNode objects.
-
-The vocabulary lives in the data file; this loader holds no domain terms. Called
-once at startup and reused for every candidate.
-"""
+"""Load the capability ontology JSON into OntologyNode objects."""
 
 from __future__ import annotations
 
@@ -15,7 +11,7 @@ EXPECTED_VERSION = "ai-capability-ontology-v1"
 
 
 def load_ontology(path: Path | str) -> list[OntologyNode]:
-    """Parse the ontology JSON and return its nodes in file order (N1..N9)."""
+    """Return the ontology nodes in file order. Raises ValueError on a version mismatch."""
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     version = raw.get("version")
     if version != EXPECTED_VERSION:

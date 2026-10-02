@@ -1,1 +1,1 @@
-"""Per-stage scoring modules (module1..module8). Each owns one responsibility."""
+"""Pipeline stages, module1 to module8."""

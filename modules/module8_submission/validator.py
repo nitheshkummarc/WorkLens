@@ -1,31 +1,28 @@
-"""Final-output validation — module8's hard gate.
-
-Re-checks the produced rows against every rule in the official validate_submission.py
-(it doesn't trust construction), plus two checks that validator can't do alone:
-real pool membership and a "scores not all identical" guard. rank.py exits non-zero
-if validate returns any error, so an invalid CSV is never treated as success.
-"""
+"""Output validation: the official validate_submission.py rules, plus pool
+membership and a non-identical-scores check."""
 
 from __future__ import annotations
 
 import re
 
 from shared.config import scoring
+from shared.config.run_config import CANDIDATE_ID_PATTERN
 from shared.models.submission import SubmissionRow
 
-REQUIRED_HEADER = ["candidate_id", "rank", "score", "reasoning"]
-_ID_PATTERN = re.compile(r"^CAND_[0-9]{7}$")
+_ID_PATTERN = re.compile(CANDIDATE_ID_PATTERN)
 
 
 class SubmissionValidator:
-    """Re-validate the top-100 rows; returns a list of human-readable errors."""
+    """`validate` returns a list of error messages; empty means valid."""
 
-    def __init__(self, pool_ids: set[str] | None = None) -> None:
+    def __init__(self, pool_ids: set[str] | None = None,
+                 expected_rows: int = scoring.SUBMISSION_ROW_COUNT) -> None:
         self.pool_ids = pool_ids or set()
+        self.expected = expected_rows
 
     def validate(self, rows: list[SubmissionRow]) -> list[str]:
         errors: list[str] = []
-        expected = scoring.SUBMISSION_ROW_COUNT
+        expected = self.expected
 
         if len(rows) != expected:
             errors.append(f"expected exactly {expected} data rows, found {len(rows)}")
@@ -34,7 +31,7 @@ class SubmissionValidator:
         seen_ranks: set[int] = set()
         for r in rows:
             if not _ID_PATTERN.match(r.candidate_id):
-                errors.append(f"candidate_id not CAND_XXXXXXX: {r.candidate_id!r}")
+                errors.append(f"candidate_id does not match {CANDIDATE_ID_PATTERN}: {r.candidate_id!r}")
             elif r.candidate_id in seen_ids:
                 errors.append(f"duplicate candidate_id: {r.candidate_id}")
             else:
@@ -49,14 +46,10 @@ class SubmissionValidator:
             else:
                 seen_ranks.add(r.rank)
 
-            if not isinstance(r.score, float):
-                errors.append(f"score is not a float at rank {r.rank}: {r.score!r}")
-
         missing = set(range(1, expected + 1)) - seen_ranks
         if missing:
             errors.append(f"missing ranks: {sorted(missing)}")
 
-        # score non-increasing by rank, and equal scores must be candidate_id ascending
         by_rank = sorted(rows, key=lambda r: r.rank)
         for a, b in zip(by_rank, by_rank[1:]):
             if a.score < b.score:
@@ -69,11 +62,9 @@ class SubmissionValidator:
                     f"{a.candidate_id} > {b.candidate_id}"
                 )
 
-        # a model that isn't differentiating gives every candidate the same score
         if rows and len({r.score for r in rows}) == 1:
-            errors.append("all scores identical — model is not differentiating")
+            errors.append("all scores are identical")
 
-        # reasoning must be present (empty reasoning is penalized at manual review)
         for r in rows:
             if not r.reasoning.strip():
                 errors.append(f"empty reasoning at rank {r.rank}")
@@ -81,4 +72,4 @@ class SubmissionValidator:
         return errors
 
 
-__all__ = ["SubmissionValidator", "REQUIRED_HEADER"]
+__all__ = ["SubmissionValidator"]

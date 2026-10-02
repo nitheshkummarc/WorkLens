@@ -1,4 +1,4 @@
-"""Turn the behavioral signals into sub-scores and a multiplier."""
+"""Turn engagement signals into sub-scores and a behavioral multiplier."""
 
 from __future__ import annotations
 

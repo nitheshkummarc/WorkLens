@@ -1,9 +1,4 @@
-"""Behavioral profile — output of module4.
-
-The 8 sub-scores, behavioral_raw, and behavioral_multiplier. Consumed by module6
-(ranking) and module7 (reasoning). Recency is measured against the AS_OF date, not
-the wall clock, so runs are reproducible.
-"""
+"""BehavioralProfile, the output of module4."""
 
 from __future__ import annotations
 
@@ -20,8 +15,8 @@ class BehavioralProfile(BaseModel):
     logistics: float = Field(ge=0, le=1)
     demand: float = Field(ge=0, le=1)
     trust: float = Field(ge=0, le=1)
-    behavioral_raw: float = Field(ge=0, le=1)
-    behavioral_multiplier: float = Field(ge=0.50, le=1.0)
+    behavioral_raw: float = Field(ge=0, le=1)                # weighted sum of the sub-scores
+    behavioral_multiplier: float = Field(ge=0, le=1.0)       # see module4_behavioral
 
 
 __all__ = ["BehavioralProfile"]

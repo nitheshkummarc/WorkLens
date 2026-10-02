@@ -1,6 +1,6 @@
 # Scoring Design
 
-Technical specification for WorkLens's deterministic scoring pipeline. This document covers every formula, constant, and decision boundary in the system.
+Specification of every formula, constant and decision boundary in WorkLens. Values match `shared/config/scoring.py`, `data/ai_capability_ontology.json` and `data/jd_rubric.json`.
 
 ---
 
@@ -10,249 +10,255 @@ Technical specification for WorkLens's deterministic scoring pipeline. This docu
 final_score(candidate):
     if honeypot(candidate):
         return 0.0
-    return capability_fit(candidate) × behavioral_multiplier(candidate)
+    return round(capability_fit(candidate) × behavioral_multiplier(candidate), 6)
 ```
 
-All scoring is deterministic — the same input always produces byte-identical output. No randomness, no wall-clock dependency, no external state.
+The same input always produces a byte-identical output: there is no randomness and no external state. Recency is measured against a reference date taken from the input (the latest `last_active_date`), not the clock.
 
 ---
 
 ## 1. Capability Scoring
 
-### 1.1 Base Capability
-
-Each candidate is scored against 9 capability nodes. Every node receives a strength based on evidence quality:
+### 1.1 Base capability
 
 ```
 base_capability = Σ(importance[n] × strength[n]) / Σ(importance[n])
 ```
 
-**Evidence tiers — how strength is assigned:**
+| Strength | Source label | Evidence |
+|----------|--------------|----------|
+| 1.0 | `career` | strong phrase in career history (titles and descriptions) |
+| 1.0 | `skill_verified` | advanced/expert skill matching any of the node's phrases, assessment ≥ 50, **and** at least a weak phrase for the node in career history |
+| 0.5 | `claimed` | strong phrase only in summary, headline or skills; or a verified skill with no career support |
+| 0.5 | `career_weak` | only a weak phrase in career history |
+| 0.0 | `none` | no evidence, or only a weak phrase in self-reported text |
 
-| Strength | Evidence Source | Rationale |
-|----------|---------------|-----------|
-| **1.0** | Strong phrase found in career history (titles + descriptions) | Demonstrated work — highest confidence |
-| **1.0** | Skill at advanced/expert with assessment score ≥ 50 | Platform-verified proficiency |
-| **0.5** | Strong phrase found only in summary, headline, or skills list | Claimed but not demonstrated |
-| **0.5** | Weak phrase found in career history | Ambiguous evidence in a credible context |
-| **0.0** | No match, or skill with assessment < 30 | No evidence, or below-threshold claim (dropped) |
+Rules are checked in the order shown; the first that applies sets the strength. Skills with an assessment score below 30 are removed before matching.
 
-> **Why this matters:** The demonstrated-vs-claimed split is the core anti-gaming mechanism. A candidate who describes building a recommendation system in their career history earns full credit (1.0). A candidate who merely lists "RAG" as a skill earns half (0.5). This asymmetry is what prevents keyword-stuffed profiles from ranking above genuinely experienced candidates.
+**Why verified skills need career support.** An assessment shows that someone knows a topic. The job description asks for work "deployed to real users", which an assessment cannot show. So an assessed skill upgrades existing career evidence to full credit, but on its own counts as a claim. Before this rule, 25 of the 46 weak top-100 entries in the review (RANKING_REVIEW.md) had core credit from assessed skills alone. A verified skill may still match through a weak phrase ("Recommendation Systems" for N3); 114 of 366 verified matches on the pool do.
 
-### 1.2 Capability Nodes
+Separating demonstrated from self-reported evidence is the main defence against keyword stuffing. An HR Manager whose career text has no AI content but who lists nine AI skills scores a final score of about 0.22. The full-pool top-100 cutoff is about 0.58.
 
-Nine capability areas, each weighted by importance to the role:
+### 1.2 Phrase matching
 
-| Node | Weight | Strong Phrases (examples) | Weak Phrases |
-|------|--------|--------------------------|-------------|
-| N1 — Retrieval & Search | 1.0 | recommendation system, search relevance, ranking system, semantic search, RAG, elasticsearch | search, relevance, query |
-| N2 — Embeddings & Vector | 1.0 | embeddings, sentence-transformers, vector database, FAISS, pinecone, dense retrieval, two-tower | vector, similarity, encoder |
-| N3 — Ranking & LTR | 1.0 | learning to rank, lambdamart, re-ranking, ranking model, recommendation engine | ranking, scoring |
-| N4 — Evaluation | 0.9 | NDCG, MRR, precision@k, A/B test, offline-online correlation | evaluation, metrics, benchmark |
-| N5 — Production Deployment | 1.0 | deployed to production, model serving, feature store, real users, monitoring, drift | deployed, pipeline, serving |
-| N6 — NLP / IR Foundations | 0.7 | NLP, text classification, NER, tokenization, language model | text, language |
-| N7 — Fine-tuning | 0.3 | fine-tuning, LoRA, QLoRA, PEFT, instruction tuning, RLHF | prompt, GPT |
-| N8 — Data & Feature Pipelines | 0.5 | data pipeline, Spark, Airflow, feature engineering, ETL, Kafka | data, pipeline, batch |
-| N9 — Distributed / Scale | 0.4 | distributed training, latency optimization, quantization, throughput, sharding | scale, latency |
+- Every phrase must start at a word boundary, so "search" does not match inside "research".
+- Phrases of four characters or fewer must also end at a word boundary, so "rag" does not match "ragged" and "map" does not match "roadmap".
+- Longer phrases may run into a longer word, so "pipeline" matches "pipelines".
+- A trailing `*` marks a stem: "tokeniz\*" matches "tokenizer" and "tokenization".
+- **Negation and comparison.** A match is ignored when one of `NEGATION_CUES` (than, toward, towards, not, no, never, without) appears among the `NEGATION_WINDOW_WORDS` (3) words before it in the same clause. On the provided pool this suppresses exactly four patterns, all correctly:
 
-**Weight rationale:**
-- **1.0 nodes** (N1, N2, N3, N5) are the core build deliverables — retrieval, embeddings, ranking, and production deployment
-- **0.9** (N4) — evaluation is a non-negotiable supporting discipline, just below the build core
-- **0.7** (N6) — foundational NLP/IR skills, valuable but not the primary deliverable
-- **0.5** (N8) — data engineering supports the pipeline but isn't the role's focus
-- **0.4** (N9) — scale/distributed is desirable but not required
-- **0.3** (N7) — fine-tuning is a nice-to-have, lowest priority
+| Suppressed phrase | Context | Role texts |
+|---|---|---|
+| ranking system | "lighter weight **than** ranking systems at FAANG" | 369 |
+| nlp, llm | "transitioning **toward** NLP/LLM work" | 366 |
+| production | "more on the modeling side **than** the productionization" | 359 |
+| benchmark | "ship models **without** offline benchmarks" | 43 |
 
-All phrase families and weights are externalized in [`data/ai_capability_ontology.json`](../data/ai_capability_ontology.json) — no vocabulary is hardcoded in scoring logic.
+### 1.3 Capability nodes
 
-### 1.3 Capability Fit
+| Node | Weight | Strong phrases (examples) | Weak phrases |
+|------|--------|---------------------------|--------------|
+| N1 Retrieval & Search | 1.0 | recommendation system, search relevance, semantic search, RAG, elasticsearch, hybrid search, search and discovery, matching layer, query understanding, index refresh | search, relevance, personalization, query |
+| N2 Embeddings & Vector | 1.0 | embeddings, sentence-transformers, vector database, vector search, FAISS, pgvector, pinecone, dense retrieval, two-tower | vector, similarity, encoder |
+| N3 Ranking & Recommendation / LTR | 1.0 | learning to rank, LTR, lambdamart, re-ranking, ranking model, recommendation engine, ranking layer, ranking algorithm | ranking, scoring, recommend |
+| N4 Evaluation & Experimentation | 0.9 | NDCG, MRR, MAP, precision@k, A/B test, offline-online correlation, evaluation framework, evaluation methodology, offline metrics, offline experimentation | evaluation, metrics, benchmark, experiment |
+| N5 ML Production & Deployment | 1.0 | deployed to production, model serving, feature store, real users, monitoring, drift | deployed, production, pipeline, serving |
+| N6 NLP / IR foundations | 0.7 | NLP, text classification, NER, tokenization, language model | text, language, embedding |
+| N7 LLM & Fine-tuning | 0.3 | fine-tuning, LoRA, QLoRA, PEFT, instruction tuning, RLHF | llm, prompt, gpt |
+| N8 Data & Feature pipelines | 0.5 | data pipeline, Spark, Airflow, feature engineering, ETL, Kafka | data, pipeline, batch, stream |
+| N9 Distributed / Scale / Inference-opt | 0.4 | distributed training, latency optimization, quantization, throughput, sharding | scale, latency, optimize |
 
-The base capability is adjusted through four modifiers to produce the final capability fit:
+Weight rationale:
+- **1.0** (N1, N2, N3, N5): the core build work of the role.
+- **0.9** (N4): evaluation is required by the job description but supports the core work.
+- **0.7** (N6): foundational NLP/IR.
+- **0.5** (N8): data engineering supports the role but is not its focus.
+- **0.4** (N9) and **0.3** (N7): desirable, not required. N7 and N9 are also the nice-to-have nodes (section 5).
 
-```
-capability_fit = clamp₀₁(effective_base × E × D − anti_penalty + nice_bonus)
-```
-
-Where `effective_base = min(base, 0.30)` if a hard disqualifier fires, otherwise `effective_base = base`.
-
----
-
-## 2. Experience Factor (E)
-
-Captures total career seniority. The role targets 5–9 years; candidates outside that range are gently penalized:
-
-| Years of Experience | Factor | Rationale |
-|--------------------|--------|-----------|
-| < 3 | 0.70 | Insufficient seniority for a senior role |
-| 3 – 5 | 0.90 | Approaching but below the ideal range |
-| **5 – 9** | **1.00** | **Ideal range — no adjustment** |
-| 9 – 12 | 0.95 | Slight over-experience; may be less hands-on |
-| > 12 | 0.85 | Significantly over-experienced for the level |
+The plain-language phrases (search and discovery, matching layer, ranking layer, evaluation framework, …) name the job description's core concepts without buzzwords, following its line 073: a candidate who built a recommendation system is a fit even without the words "RAG" or "Pinecone". Each was checked against every distinct text in the pool and matches only search, ranking or evaluation work.
 
 ---
 
-## 3. Domain Depth Factor (D)
+## 2. Capability Fit
 
-Distinguishes total seniority from domain-specific depth. Two candidates with identical capability evidence but different tenure in relevant roles should be ranked differently.
+```
+capability_fit = clamp01((effective_base × E × D − anti_penalty + nice_bonus) / fit_max)
+effective_base = min(base, 0.30) if a hard-DQ anti-signal fires, else base
+fit_max        = max(E) × ML_DEPTH_FACTOR_HIGH + nice_bonus_cap = 1.0 × 1.10 + 0.10 = 1.2
+```
 
-A career history role is **domain-relevant** if its title or description matches any strong or weak phrase from nodes N1–N7 (the core technical nodes). `domain_months = Σ duration_months` over all matching roles.
+Dividing by `fit_max` keeps the score in [0, 1] without clamping the strongest profiles to the same value. Before this change, 8 of the top 10 sat at exactly 1.0 and only behaviour ordered them.
 
-| Domain Years | Factor | Rationale |
-|-------------|--------|-----------|
-| ≥ 4 | **1.10** | Deep domain tenure — meets the ideal profile |
-| 2 – 4 | 1.00 | Solid but below ideal depth — neutral |
-| 1 – 2 | 0.95 | Real but shallow tenure — mild discount |
-| < 1 (with capability signal) | 0.85 | Recent pivot or skills-only claim — demote |
-| No relevant roles (capability ≈ 0) | 1.00 | Neutral — base capability already handles this |
+### 2.1 Experience factor (E)
 
-**Properties:**
-- D ∈ [0.85, 1.10] — bounded and safe by construction
-- Multiplicative on `base_capability` — only meaningfully re-orders candidates who already have a real base score
-- `clamp₀₁` prevents the 1.10 boost from exceeding 1.0
+| Years of experience | Factor |
+|--------------------|--------|
+| < 3 | 0.70 |
+| 3 to < 5 | 0.90 |
+| **5 to < 9** | **1.00** |
+| 9 to < 12 | 0.95 |
+| ≥ 12 | 0.85 |
+
+### 2.2 ML-depth factor (D)
+
+A role is ML-relevant if its title or description matches any phrase of the rubric's `ml_nodes` (N1-N7 for this role). `ml_relevant_months` is the sum of those roles' durations, capped at the candidate's stated experience.
+
+| ML years | Factor | Meaning |
+|----------|--------|---------|
+| ≥ 4 | 1.10 | meets the role's 4-5 years of applied ML |
+| 2 to < 4 | 1.00 | neutral |
+| 1 to < 2 | 0.95 | shallow |
+| < 1, with capability evidence | 0.85 | recent pivot or self-reported only |
+| < 1, no capability evidence | 1.00 | base is already near zero; no double penalty |
 
 ---
 
-## 4. Anti-Signal Penalties
+## 3. Anti-Signal Penalties
 
-Subtractive penalties for negative indicators detected in the candidate's profile. Total penalty is capped at 0.50.
+Subtractive; the total is capped at 0.50.
 
-| Anti-Signal | Detection | Penalty | Hard DQ? |
-|------------|-----------|---------|----------|
-| Pure research, no production | All titles/descriptions are research/academic; no production deployment evidence | −0.25 | **Yes** (caps base at 0.30) |
-| Consulting-only career | Every employer is a consulting firm and no product company experience | −0.125 | No |
-| Wrapper-only, no fundamentals | Only recent wrapper/API terms, no pre-existing production evidence | −0.20 | No |
-| Framework-tutorial profile | Skills/descriptions dominated by tutorial/demo/bootcamp terms | −0.15 | No |
-| Title-chasing | ≥3 roles each under 18 months with rising seniority titles | −0.10 | No |
-| No recent hands-on (senior) | Current title is management/architect with no recent individual contributor signal | −0.10 | No |
-| Domain mismatch (CV/Speech/Robotics) | Strong vision/speech/robotics evidence with zero retrieval/NLP/IR nodes | −0.15 | No |
+| Key | Fires when | Penalty | Hard DQ |
+|-----|-----------|---------|---------|
+| `research_only` | a research title (research scientist, postdoc, research intern, …) and no production term anywhere in the career | −0.25 | yes (base capped at 0.30) |
+| `consulting_only` | every employer is a listed consulting firm | −0.125 | no |
+| `langchain_only` | LLM-wrapper terms in career text, no earlier-ML terms, **and** no retrieval/ranking career evidence (`retrieval_nodes`) | −0.20 | no |
+| `framework_tutorial` | tutorial/bootcamp/course terms anywhere, and no strong phrase in career history | −0.15 | no |
+| `title_chasing` | at least 3 **completed** roles, each shorter than 18 months (the current role is excluded) | −0.10 | no |
+| `no_recent_handson` | current title is senior/managerial and the current role description has no production term | −0.10 | no |
+| `cv_speech_robotics` | vision/speech/robotics terms in career text and no evidence at all for the rubric's `ir_nlp_nodes` | −0.15 | no |
 
-> **Why "pure research" is the only hard DQ:** It carries both the 0.30 cap and the −0.25 penalty. The cap bounds how high a research-only profile can register; the penalty pushes it further down within that ceiling. After experience adjustment: `clamp₀₁(min(base, 0.30) × E − 0.25 + nice) ≈ 0.05`. This reflects the role's strongest non-honeypot requirement — production deployment is non-negotiable.
+`research_only` is the only hard disqualifier because the role requires production deployment. With both the cap and the penalty applied, a research-only profile ends near zero.
 
-### Nice-to-Have Bonus
+**`langchain_only` and retrieval work.** The job description's exemption is "substantial pre-LLM-era ML production experience … people who understood retrieval and ranking". Before the retrieval-evidence check, all 12 firings on the pool hit candidates with production retrieval work (for example FAISS semantic search plus a later RAG chatbot); one was pushed to rank 1,095.
 
-Small additive bonus for supplementary capability nodes (N7 Fine-tuning, N9 Distributed/Scale):
-
-- **+0.03** per qualifying node
-- **Cap: +0.10** total
+**Firing on the provided pool.** `consulting_only` fires on 9,745 candidates and `title_chasing` on 1,487. The other five rules fire on none. The pool's only research-flavoured title is "AI Research Engineer"; no current title is managerial; profiles with vision terms or LLM-wrapper terms always carry retrieval or NLP evidence. The rules are kept because they encode requirements from the job description, and each is tested firing and not firing (`tests/test_anti_signals.py`).
 
 ---
 
-## 5. Behavioral Multiplier
-
-Converts 23 platform engagement signals into a rescaling factor. Behavior modifies capability — it never overrides it.
+## 4. Behavioral Multiplier
 
 ```
-behavioral_multiplier = 0.50 + 0.50 × behavioral_raw     ∈ [0.50, 1.00]
-behavioral_raw = Σ(weight[k] × sub_score[k])              ∈ [0, 1], weights sum to 1.0
+behavioral_raw        = Σ(weight[k] × sub_score[k])            weights sum to 1.0
+behavioral_multiplier = 0.50 + 0.50 × behavioral_raw          in [0.50, 1.00]
+                        0.50 if unavailable
+                        × 0.80 if outside the home country
 ```
 
-### Sub-Scores
+### 4.1 Sub-scores
 
-| Sub-Score | Weight | Input Signals | Scoring |
-|-----------|--------|--------------|---------|
-| **Recency** | 0.30 | `last_active_date` vs. fixed reference date | ≤30d → 1.0 · ≤60d → 0.9 · ≤90d → 0.75 · ≤180d → 0.5 · else → 0.25 |
-| **Responsiveness** | 0.25 | `recruiter_response_rate`, `avg_response_time_hours` | response_rate × time_factor (≤24h → 1.0 · ≤72h → 0.9 · else → 0.8) |
-| **Open to Work** | 0.10 | `open_to_work_flag` | true → 1.0 · false → 0.4 |
-| **Interview** | 0.10 | `interview_completion_rate` | Direct value; missing → 0.5 (neutral) |
-| **Offer** | 0.05 | `offer_acceptance_rate` | Direct value; −1 sentinel → 0.5 (neutral) |
-| **Logistics** | 0.10 | `notice_period_days`, `location`, `preferred_work_mode` | Mean of three sub-factors (see below) |
-| **Demand** | 0.07 | `saved_by_recruiters_30d`, `search_appearance_30d` | Log-normalized mean, capped |
-| **Trust** | 0.03 | `verified_email`, `verified_phone`, `linkedin_connected` | Fraction of verifications that are true |
+| Sub-score | Weight | Signals | Scoring |
+|-----------|--------|---------|---------|
+| Recency | 0.30 | days since `last_active_date` | ≤30d 1.0 · ≤60d 0.9 · ≤90d 0.75 · ≤180d 0.5 · else 0.25 |
+| Responsiveness | 0.25 | `recruiter_response_rate`, `avg_response_time_hours` | rate × time factor (≤24h 1.0 · ≤72h 0.9 · else 0.8) |
+| Open to work | 0.10 | `open_to_work_flag` | true 1.0 · false 0.4 |
+| Interview | 0.10 | `interview_completion_rate` | value as given |
+| Offer | 0.05 | `offer_acceptance_rate` | value as given; −1 (no history) → 0.5 |
+| Logistics | 0.10 | notice period, location, work mode | mean of three factors (below) |
+| Demand | 0.07 | `saved_by_recruiters_30d`, `search_appearance_30d` | mean of log1p-scaled counts, capped at 20 and 500 |
+| Trust | 0.03 | `verified_email`, `verified_phone`, `linkedin_connected` | fraction true |
 
-### Logistics Sub-Factors
+### 4.2 Logistics factors
 
 | Factor | Scoring |
 |--------|---------|
-| **Notice period** | ≤30d → 1.0 · ≤60d → 0.8 · ≤90d → 0.6 · else → 0.4 |
-| **Location** | Office cities (Pune/Noida) → 1.0 · Target cities (Hyderabad/Mumbai/Delhi NCR) → 0.85 · India + willing to relocate → 0.85 · India, not relocating → 0.55 · Outside India → 0.30 |
-| **Work mode** | Hybrid/onsite → 1.0 · Remote → 0.7 |
+| Notice period | ≤30d 1.0 · ≤60d 0.8 · ≤90d 0.6 · else 0.4 |
+| Location | office city 1.0 · other welcomed city 0.85 · in the home country and willing to relocate 0.85 · in the home country, not relocating 0.55 · outside 0.30 |
+| Work mode | a preferred mode (hybrid, flexible, onsite) 1.0 · otherwise 0.7 |
 
-### Missing Signal Handling
+Cities, the home country and the preferred work modes come from the rubric's `logistics` section.
 
-All `-1` sentinels and absent fields map to **neutral** (typically 0.5), never to 0. Absence of a signal is never treated as a negative indicator.
+### 4.3 Availability rules
 
-### Why a Multiplier (Not Additive)
+- **Unavailable:** inactive for more than `UNAVAILABLE_DAYS` (180) or a recruiter response rate below `UNAVAILABLE_RESPONSE_RATE` (0.10). The multiplier is set to the floor (0.50). This implements the job description's line 074: "a perfect-on-paper candidate who hasn't logged in for 6 months and has a 5% recruiter response rate is, for hiring purposes, not actually available".
+- **Outside the home country:** the multiplier is scaled by `OUTSIDE_HOME_COUNTRY_FACTOR` (0.80). The employer does not sponsor work visas, and the location factor alone moved the score by only about 1-2%.
 
-- Keeps capability as the **primary ranking axis** — behavioral signals only re-order candidates within similar capability bands
-- A multiplier floor of 0.50 ensures strong but inactive candidates are halved, not dropped
-- Two equally-capable candidates are separated by up to 2× based on availability and engagement
+On the provided pool 20,315 candidates are unavailable and 24,887 are outside India.
+
+### 4.4 Signals not used
+
+`profile_completeness_score`, `signup_date`, `profile_views_received_30d`, `applications_submitted_30d`, `connection_count`, `endorsements_received`, `expected_salary_range_inr_lpa` and `github_activity_score`. `skill_assessment_scores` is used by capability scoring. See DESIGN_DECISIONS.md for the reasons.
+
+### 4.5 Why a multiplier
+
+- Capability stays the primary ranking axis; behaviour reorders candidates of similar capability.
+- The floor keeps a strong but unavailable candidate in the list at a reduced score rather than removing them.
+
+---
+
+## 5. Nice-to-Have Bonus
+
++0.03 for each nice-to-have node (N7, N9) with any evidence, capped at +0.10.
 
 ---
 
 ## 6. Honeypot Detection
 
-Two high-precision rules detect provably-impossible profiles. Any match sets `final_score = 0.0`.
+| Rule | Condition | Meaning |
+|------|-----------|---------|
+| H1 | ≥ 3 skills at advanced/expert with `duration_months == 0` | claims expertise in skills never used |
+| H2 | `Σ duration_months > years_of_experience × 18 + 12` | more career history than the stated experience allows, with slack for overlapping roles |
 
-| Rule | Condition | Interpretation |
-|------|-----------|---------------|
-| **H1** — Expert-but-unused cluster | ≥3 skills at advanced/expert with `duration_months == 0` | Claims expertise in skills they have never used |
-| **H2** — Tenure exceeds working life | `Σ career_months > years_of_experience × 18 + 12` | More career history than their stated working life allows (generous slack for overlapping roles) |
-
-**Design properties:**
-- **High precision, conservative thresholds** — fires on ~0.04% of the pool. Favors false negatives over false positives (burying a real candidate is worse than missing one impossible profile)
-- **Keyword-stuffers are NOT honeypots** — a wrong-title profile with many listed skills is sunk by the capability scoring (unverified skills capped at 0.5) and anti-signal penalties, not by honeypot detection
-- These rules are reserved for *provably impossible* profiles only
+On the provided pool these flag 43 candidates (0.043%): 21 by H1 and 22 by H2. A flagged candidate's final score is 0.
 
 ---
 
-## 7. Final Ranking
+## 7. Ranking
 
 ```
-For each candidate in the input stream:
-    base   = base_capability(candidate)                      # Importance-weighted node strengths
-    if hard_dq: base = min(base, 0.30)                       # Cap for "pure research, no production"
-    fit    = clamp₀₁(base × E × D − anti_penalty + nice)    # Apply all modifiers
-    M      = 0.50 + 0.50 × behavioral_raw                   # Behavioral multiplier
-    final  = 0.0 if honeypot else fit × M                    # Final score
+for each candidate in the input stream:
+    fit   = capability_fit(candidate)
+    M     = behavioral_multiplier(candidate)
+    final = 0.0 if honeypot else round(fit × M, 6)
+    offer (final, reversed candidate_id) to a min-heap of size K (default 100, --top-k)
 
-Top-K selection via streaming bounded min-heap (K=100):
-    → O(N log K) time, O(K) memory
-    → Score descending, candidate ID ascending for ties
-    → Heap carries full scoring context per candidate (no second pass)
+sort the retained K by final descending, candidate_id ascending; assign ranks 1..K
 ```
 
-### Output Schema
+O(N log K) time. Equal scores keep the smaller candidate id, both during eviction and in the final order, for any id format.
+
+### Output schema
 
 | Column | Type | Constraint |
 |--------|------|-----------|
-| `candidate_id` | string | `CAND_XXXXXXX` format, must exist in pool, unique |
-| `rank` | int | 1–100, each exactly once |
-| `score` | float | `round(final, 6)`, non-increasing with rank |
-| `reasoning` | string | 1–2 sentences, fact-grounded, varied per candidate |
+| `candidate_id` | string | matches `CANDIDATE_ID_PATTERN`, unique, present in the input pool |
+| `rank` | int | 1..K, each exactly once |
+| `score` | float | six decimals, non-increasing with rank |
+| `reasoning` | string | one line, built from the candidate's own data |
 
-### Reasoning Generation
-
-Each ranked candidate receives a deterministic, template-based explanation:
+### Reasoning
 
 ```
-"{title}, {years} yrs — {strengths with evidence}. {behavioral note}. Concern: {concern}."
+first half of the list:   "{title}, {years} yrs — {strengths}. {activity}. Concern: {gap}."
+second half:              "{title}, {years} yrs — main gap: {gap}. {strengths}; {activity}."
+no gap found:             "{title}, {years} yrs — {strengths}. {activity}. No material gap identified."
 ```
 
-- Every claim references the candidate's own fields or a matched evidence phrase
-- Content varies because capability nodes, evidence, tenure, and concerns differ per candidate
-- Tone follows rank — top candidates lead with strengths, lower-ranked candidates lead with concerns
+- **Strengths** lists up to three capability areas, the first with its evidence phrase, plus applied-ML tenure when it is `REASON_ML_TENURE_YEARS` (4) or more.
+- **Activity** states the days since the candidate was last active, the recruiter response rate and the open-to-work status.
+- **The gap** is chosen in the order given in ARCHITECTURE.md, Stage 7. Anti-signal wording comes from the rubric's `anti_signal_concerns`.
+- **Partial evidence** is worded by source: "only self-reported" or "only indirect … in career history".
 
 ---
 
 ## 8. Configuration Reference
 
-All constants referenced in this document are centralized in two locations:
+| Source | Contains |
+|--------|----------|
+| [`shared/config/scoring.py`](../shared/config/scoring.py) | penalties, weights, bands, thresholds, caps, negation cues, availability rules, reasoning thresholds |
+| [`shared/config/run_config.py`](../shared/config/run_config.py) | candidate id format |
+| [`data/ai_capability_ontology.json`](../data/ai_capability_ontology.json) | capability nodes, phrase lists, importances |
+| [`data/jd_rubric.json`](../data/jd_rubric.json) | nice-to-have and ML-relevant nodes, anti-signal vocabulary and wording, consulting firms, logistics (home country, cities, work modes) |
 
-| Source | Contains | File |
-|--------|----------|------|
-| Scoring constants | Penalties, weight tables, experience bands, thresholds, behavioral weights | [`shared/config/scoring.py`](../shared/config/scoring.py) |
-| Job specification | Capability node definitions, phrase families, importance weights | [`data/ai_capability_ontology.json`](../data/ai_capability_ontology.json) |
-| Role vocabulary | Anti-signal keywords, consulting companies, target cities, logistics buckets | [`data/jd_rubric.json`](../data/jd_rubric.json) |
-
-To adapt WorkLens to a different role: modify the JSON data files and update the constants in `scoring.py`. No structural code changes are required.
+To adapt WorkLens to another role, edit the two JSON files and, if needed, the constants. To use a pool with a different id format, change `CANDIDATE_ID_PATTERN`. No code changes are needed.
 
 ---
 
 ## 9. Known Limitations
 
-Documented transparently:
-
-- **Vocabulary coverage** — Rule-based matching can miss candidates whose work is phrased outside the ontology's phrase families. Mitigated by including plain-language forms (e.g., "built a recommendation system" matches without buzzwords)
-- **Missing-signal assumption** — The neutral mapping for absent signals assumes missingness is non-informative. If missingness correlates with candidate quality, behavioral scoring may be systematically biased
-- **Assessment data sparsity** — Only ~24% of candidates carry any `skill_assessment_scores`. Description-content scoring is the primary anti-gaming mechanism; assessment gating is a secondary defense
-- **Honeypot residual risk** — Some impossibility patterns (e.g., company founding date vs. claimed tenure) cannot be verified from the available schema fields
+- **Vocabulary coverage.** Phrase matching can miss work described outside the ontology's phrases. Plain-language forms reduce this but do not remove it; there is no semantic (embedding) recall.
+- **Negation is a heuristic.** The three-word cue window handles comparisons and stated non-experience; it does not parse sentences.
+- **Calibration.** Weights are reasoned from the job description, not fitted to labelled data. `tools/sensitivity.py` measures how much the ranking moves when they are perturbed.
+- **Assessment sparsity.** Only 24% of candidates have any `skill_assessment_scores`, so career-text evidence carries most of the anti-gaming weight.
+- **Honeypot coverage.** Some impossibility patterns (for example, tenure longer than an employer has existed) cannot be checked from the available fields.
+- **Inactive anti-signals.** Five of the seven anti-signal rules do not fire on the provided pool (section 3).
+- **Must-haves are weighted, not required.** A candidate with broad production ML but no retrieval or embedding work can still reach the lower part of the top 100 (RANKING_REVIEW.md lists the cases).

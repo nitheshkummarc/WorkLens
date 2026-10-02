@@ -1,4 +1,4 @@
-"""Build the per-candidate reasoning string."""
+"""Build the reasoning string for each ranked candidate."""
 
 from __future__ import annotations
 

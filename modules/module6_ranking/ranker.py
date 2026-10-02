@@ -1,20 +1,11 @@
-"""Final score + streaming top-K selection — module6.
+"""Final score and streaming top-K selection.
 
-final = 0.0 if honeypot else capability_fit * behavioral_multiplier. The top 100
-are kept with a bounded min-heap (size 100) over the stream — O(N log K) time,
-O(K) memory. It does not collect all 100K scores and full-sort.
+final = 0.0 if honeypot else round(capability_fit * behavioral_multiplier, 6)
 
-Heap element: (final, -candidate_num, Candidate, CapabilityProfile, CapabilityFit,
-BehavioralProfile, HoneypotAnalysis) with candidate_num = int(candidate_id[5:]).
-The leading (final, -candidate_num) pair is unique, so heapq never compares the
-trailing Pydantic objects — carrying them lets module7 run on the retained 100
-with no second pass. On a score tie the eviction drops the higher id, so the
-smaller id is kept (matching the id-ascending tie-break).
-
-After the stream the retained 100 are sorted by (round(final,6) desc,
-candidate_id asc) to assign ranks 1..100, and the emitted score is round(final,6).
-This makes the CSV satisfy the validator (non-increasing score; equal score means
-id ascending) by construction.
+Heap entries are (score, _Descending(candidate_id), payload...). On equal
+scores the larger id compares smaller and is evicted first, matching the
+score-desc / id-asc order for any id format. Ids are unique (the reader drops
+duplicates), so payloads are never compared.
 """
 
 from __future__ import annotations
@@ -28,42 +19,50 @@ from shared.models.candidate import Candidate
 from shared.models.capability import CapabilityProfile
 from shared.models.capability_fit import CapabilityFit
 from shared.models.honeypot import HoneypotAnalysis
-from shared.models.ranking import RankedCandidate
-
-_HeapElem = tuple
 
 
 @dataclass(frozen=True)
 class RankedEntry:
-    """One retained top-K candidate with its full per-candidate context."""
+    """A retained candidate and its scoring objects."""
 
     rank: int
-    score: float                       # round(final, 6)
-    final_raw: float                   # unrounded final (for diagnostics)
+    score: float
     candidate: Candidate
     capability: CapabilityProfile
     fit: CapabilityFit
     behavioral: BehavioralProfile
     honeypot: HoneypotAnalysis
 
-    @property
-    def ranked_candidate(self) -> RankedCandidate:
-        return RankedCandidate(candidate_id=self.candidate.candidate_id, rank=self.rank, score=self.score)
+
+class _Descending:
+    """String key with reversed ordering, for the heap tie-break."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def __lt__(self, other: "_Descending") -> bool:
+        return self.value > other.value
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Descending) and self.value == other.value
 
 
 def final_score(fit: CapabilityFit, behavioral: BehavioralProfile, honeypot: HoneypotAnalysis) -> float:
-    """Honeypots sink to 0.0; otherwise capability_fit is rescaled by behaviour."""
+    """Rounded final score; 0.0 for a honeypot."""
     if honeypot.is_honeypot:
         return 0.0
-    return fit.capability_fit * behavioral.behavioral_multiplier
+    return round(fit.capability_fit * behavioral.behavioral_multiplier,
+                 scoring.SCORE_ROUND_DECIMALS)
 
 
 class TopKRanker:
-    """Streaming bounded-heap selector for the top-K candidates by final score."""
+    """Keep the K highest-scoring candidates from a stream."""
 
     def __init__(self, k: int = scoring.SUBMISSION_ROW_COUNT) -> None:
         self.k = k
-        self._heap: list[_HeapElem] = []
+        self._heap: list[tuple] = []
 
     def add(
         self,
@@ -73,41 +72,22 @@ class TopKRanker:
         behavioral: BehavioralProfile,
         honeypot: HoneypotAnalysis,
     ) -> None:
-        final = final_score(fit, behavioral, honeypot)
-        num = int(candidate.candidate_id[5:])
-        elem = (final, -num, candidate, capability, fit, behavioral, honeypot)
+        score = final_score(fit, behavioral, honeypot)
+        elem = (score, _Descending(candidate.candidate_id),
+                candidate, capability, fit, behavioral, honeypot)
         if len(self._heap) < self.k:
             heapq.heappush(self._heap, elem)
         else:
-            # push + pop-smallest in one op; if elem is the smallest it is dropped.
             heapq.heappushpop(self._heap, elem)
 
     def finalize(self) -> list[RankedEntry]:
-        """Sort retained candidates by (rounded final DESC, id ASC); assign ranks."""
-        ordered = sorted(
-            self._heap,
-            key=lambda e: (-round(e[0], scoring.SCORE_ROUND_DECIMALS), e[2].candidate_id),
-        )
-        entries: list[RankedEntry] = []
-        for rank, e in enumerate(ordered, start=1):
-            final = e[0]
-            entries.append(
-                RankedEntry(
-                    rank=rank,
-                    score=round(final, scoring.SCORE_ROUND_DECIMALS),
-                    final_raw=final,
-                    candidate=e[2],
-                    capability=e[3],
-                    fit=e[4],
-                    behavioral=e[5],
-                    honeypot=e[6],
-                )
-            )
-        return entries
-
-    @property
-    def size(self) -> int:
-        return len(self._heap)
+        """Return the retained candidates ordered by score desc, candidate_id asc."""
+        ordered = sorted(self._heap, key=lambda e: (-e[0], e[2].candidate_id))
+        return [
+            RankedEntry(rank=rank, score=e[0], candidate=e[2], capability=e[3],
+                        fit=e[4], behavioral=e[5], honeypot=e[6])
+            for rank, e in enumerate(ordered, start=1)
+        ]
 
 
 __all__ = ["TopKRanker", "RankedEntry", "final_score"]

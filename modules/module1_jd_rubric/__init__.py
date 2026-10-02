@@ -1,4 +1,4 @@
-"""Build the JD rubric — one JDProfile per run."""
+"""Build the JDProfile used for the whole run."""
 
 from __future__ import annotations
 

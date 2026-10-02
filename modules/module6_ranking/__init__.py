@@ -1,4 +1,4 @@
-"""Compute the final score and pick the top 100 with a streaming heap."""
+"""Compute the final score and select the top K with a streaming heap."""
 
 from __future__ import annotations
 

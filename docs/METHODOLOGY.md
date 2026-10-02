@@ -2,62 +2,71 @@
 
 ## Overview
 
-WorkLens ranks 100,000 candidate profiles against a structured job specification and returns the top 100 — in under two minutes, on a single CPU core, with no GPU, no network access, and no pre-computation. It is a deterministic, rule-based scoring engine.
+WorkLens ranks 100,000 candidate profiles against a structured job specification and returns the top 100. It runs in about 17-30 seconds on a single CPU core, with no GPU, no network access and no pre-computation. It is a deterministic, rule-based scoring engine; there is no trained model.
 
-The core design principle: **score what a candidate demonstrably did in their career history, not what they list as skills.** A description of building a recommendation system earns full credit; listing "RAG" as a skill earns half. This asymmetry is the primary defense against keyword-stuffed profiles.
+The central rule: **score what a candidate did in their career history, not what they list as skills.** Describing a recommendation system in a role description earns full credit for that capability; listing "RAG" as a skill earns half. This is the main defence against keyword-stuffed profiles.
 
 ---
 
 ## Scoring Pipeline
 
-`final = 0` if the profile is provably impossible; otherwise `final = capability_fit × behavioral_multiplier`.
+`final = 0` if the profile is internally impossible; otherwise `final = capability_fit × behavioral_multiplier`, rounded to six decimals.
 
-### 1. Job Specification → Structured Rubric
+### 1. Job specification to rubric
 
-The job description is encoded as nine weighted capability areas (retrieval, embeddings, ranking, evaluation, production deployment, NLP, fine-tuning, data pipelines, distributed systems) with node-specific importance weights. Requirements the job explicitly rejects — pure research backgrounds, consulting-only careers, framework-tutorial evidence — become anti-signal penalties. All vocabulary lives in data files, not hardcoded in logic.
+The job description is encoded as nine weighted capability areas: retrieval, embeddings, ranking, evaluation, production deployment, NLP, fine-tuning, data pipelines and distributed systems. Patterns the job explicitly rejects (research-only backgrounds, consulting-only careers, tutorial-level evidence, and others) become anti-signal penalties. All vocabulary lives in data files; all numbers live in `shared/config/scoring.py`.
 
-### 2. Capability Extraction from Evidence
+### 2. Capability evidence
 
-For each capability area, evidence is sourced from two tiers:
+For each capability area, evidence is graded by where it appears:
 
-- **Demonstrated** (career titles + descriptions): work someone actually did → full credit (1.0)
-- **Claimed** (summary, headline, skills list): self-asserted → half credit (0.5), unless backed by a platform assessment score ≥ 50
+- **Career history** (titles and descriptions): a specific technical phrase earns full credit (1.0). A generic phrase such as "production" or "pipeline" earns half (0.5).
+- **Self-reported** (summary, headline, skills): a specific phrase earns half credit (0.5). An advanced/expert skill with a platform assessment of 50 or more earns full credit when the career history at least loosely supports it; otherwise it also counts as half. Skills with an assessment below 30 are ignored.
+- **Context:** a phrase inside a comparison or a statement of non-experience ("lighter weight than ranking systems", "transitioning toward NLP") is not counted.
 
-The importance-weighted mean of all node strengths produces `base_capability ∈ [0, 1]`.
+The importance-weighted mean of the node strengths gives `base_capability` in [0, 1].
 
-### 3. Fit Adjustment
+### 3. Fit adjustment
 
-The base capability is modulated by:
+The base capability is adjusted by:
 
-- **Experience factor** — the role targets 5–9 years; under- and over-experience are penalized
-- **Domain depth factor** — rewards sustained tenure in relevant roles (≥4 years → 1.10×)
-- **Anti-signal penalties** — subtractive, capped at 0.50
-- **Nice-to-have bonus** — small additive reward for supplementary capabilities, capped at 0.10
+- **Experience factor**: the role targets 5-9 years; shorter and much longer careers are discounted.
+- **ML-depth factor**: rewards years spent in ML-relevant roles (1.10 at four years or more, 0.85 for under a year).
+- **Anti-signal penalties**: subtracted, capped at 0.50 in total.
+- **Nice-to-have bonus**: a small addition for supplementary capabilities, capped at 0.10.
 
-### 4. Behavioral Multiplier
+The result is divided by its largest possible value (1.2), so `capability_fit` stays in [0, 1] and the strongest profiles keep distinct scores.
 
-Twenty-three platform engagement signals are distilled into eight weighted sub-scores (recency, responsiveness, openness, interview history, offer history, logistics, demand, trust), producing a multiplier in [0.50, 1.00]. Behavior rescales capability — a strong but inactive candidate is halved, not dropped.
+### 4. Behavioral multiplier
 
-Recency is measured against a fixed reference date (the dataset's latest `last_active_date`), not the system clock. Missing or sentinel values (e.g., `offer_acceptance_rate == -1`) map to a neutral score. Absence of a signal is never treated as negative.
+Fourteen of the 23 platform signals are combined into eight weighted sub-scores (recency, responsiveness, open to work, interview completion, offer acceptance, logistics, demand, trust), giving a multiplier in [0.50, 1.00]. Behaviour rescales capability but cannot create it.
 
-### 5. Impossibility Detection
+Two availability rules follow the job description directly:
+- a candidate inactive for more than 180 days or with a recruiter response rate below 10% is treated as unavailable and gets the floor multiplier (0.50);
+- a candidate outside the home country has the multiplier scaled by 0.80, because the company does not sponsor work visas.
 
-Two conservative rules detect provably-impossible profiles:
+Recency is measured against a reference date taken from the input (the latest `last_active_date`, or `--as-of`), not the system clock. A missing offer history (`offer_acceptance_rate == -1`) is scored as neutral.
 
-- **H1:** ≥3 skills claimed at advanced/expert with zero months of use
-- **H2:** Total career tenure exceeds `years_of_experience × 18 + 12` months
+### 5. Impossibility detection
 
-These fire on ~0.04% of the pool. Flagged candidates receive a final score of zero. Keyword-stuffers with plausible timelines are handled by the capability and anti-signal stages, not here.
+Two conservative rules detect internally impossible profiles:
 
-### 6. Top-K Selection and Explanation
+- **H1:** three or more skills claimed at advanced/expert with zero months of use.
+- **H2:** total career tenure exceeds `years_of_experience × 18 + 12` months.
 
-A bounded min-heap (size 100) retains only the highest-scoring candidates during the single streaming pass — O(N log K) time, O(K) memory, no full sort. Each retained candidate receives a one-sentence explanation built entirely from their own profile fields. A hard validation gate checks every output constraint before writing the CSV.
+They flag 43 of the 100,000 profiles. A flagged candidate scores zero. Keyword-stuffed profiles with a plausible timeline are handled by the capability and anti-signal stages instead.
+
+### 6. Top-K selection and explanation
+
+A bounded min-heap of size K (100 by default) keeps the highest-scoring candidates during the single pass. Each retained candidate gets a one-line explanation built from their own profile: title, experience, strongest capability areas with an evidence phrase, recent activity, and the most significant gap. A validation step checks every output rule before the CSV is written.
 
 ---
 
-## Design Properties
+## Properties
 
-- **Performance:** One pass over the input, fixed-size heap — ~2 minutes for 100K records on a single CPU core.
-- **Determinism:** Same input always produces byte-identical output. No wall-clock dependency, no randomness, no floating-point order sensitivity.
-- **Explainability:** Every ranking includes a fact-grounded reason referencing the candidate's own data. No fabricated claims.
-- **Robustness:** Perturbing scoring weights by ±15% keeps ~97% of the top 10 stable — the output does not hinge on any single parameter.
+- **Performance:** one pass over the input plus a fast scan for the reference date; about 17-30 seconds for 100K records on a single core, about 2.8× faster than the submitted version (see PERFORMANCE.md).
+- **Match quality:** an independent review against the job description (RANKING_REVIEW.md) grades all 10 of the top 10 as strong matches, and 94 of the top 100 as strong or good.
+- **Determinism:** the same input produces a byte-identical CSV. There is no wall-clock dependency and no randomness, and scores are rounded before ranking.
+- **Configuration, not code:** the role (ontology and rubric JSON), the numbers (`scoring.py`), the id format and the list size are all configurable; the reference date is detected from the data.
+- **Explainability:** every row's reason is assembled from the candidate's own fields, and its wording follows how strong the evidence is.
+- **Robustness:** with node importances perturbed by ±15% and the experience and ML-depth factors by ±0.05 (8 trials on an 8,000-candidate sample), the top 10 overlaps the unperturbed top 10 by 96% on average and the top 100 by 96%. Reproduce with `python tools/sensitivity.py --candidates ./candidates.jsonl`.

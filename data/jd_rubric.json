@@ -1,11 +1,21 @@
 {
   "version": "jd-rubric-v1",
   "role": "Senior AI Engineer",
-  "description": "JD selections/vocabulary for the Senior AI Engineer role (REDROB_SCORING_DESIGN.md §1). Carries WHICH nodes/keys/lists apply; the numeric penalties, bands, bonuses and caps live in shared/config/scoring.py. module1_jd_rubric pairs the two into a JDProfile.",
+  "description": "Role vocabulary for the Senior AI Engineer rubric: nice-to-have and ML-relevant nodes, the anti-signals that apply, the terms that detect them and the wording used in reasoning, consulting firms, and logistics (home country, office cities, preferred work modes). Numeric values (penalties, bands, bonuses, caps) are in shared/config/scoring.py. module1_jd_rubric combines the two into a JDProfile. See docs/SCORING_DESIGN.md.",
 
   "nice_to_have_nodes": [
     "N7 LLM & Fine-tuning",
     "N9 Distributed / Scale / Inference-opt"
+  ],
+
+  "ml_nodes": [
+    "N1 Retrieval & Search",
+    "N2 Embeddings & Vector",
+    "N3 Ranking & Recommendation / LTR",
+    "N4 Evaluation & Experimentation",
+    "N5 ML Production & Deployment (MLOps)",
+    "N6 NLP / IR foundations",
+    "N7 LLM & Fine-tuning"
   ],
 
   "anti_signals": [
@@ -25,7 +35,8 @@
     },
     "langchain_only": {
       "llm_wrapper_terms": ["langchain", "llamaindex", "llama index", "openai api", "gpt-4", "gpt wrapper", "prompt engineering", "chatgpt"],
-      "pre_llm_ml_terms": ["xgboost", "scikit-learn", "tensorflow", "pytorch", "recommendation", "ranking", "classification", "regression", "feature engineering"]
+      "pre_llm_ml_terms": ["xgboost", "scikit-learn", "tensorflow", "pytorch", "recommendation", "ranking", "classification", "regression", "feature engineering"],
+      "retrieval_nodes": ["N1 Retrieval & Search", "N2 Embeddings & Vector", "N3 Ranking & Recommendation / LTR"]
     },
     "framework_tutorial": {
       "tutorial_terms": ["tutorial", "demo project", "course project", "bootcamp", "hello world", "sample app", "toy project", "udemy", "coursera project"]
@@ -35,7 +46,7 @@
     },
     "cv_speech_robotics": {
       "domain_terms": ["computer vision", "image classification", "object detection", "image segmentation", "opencv", "speech recognition", "speech-to-text", "asr", "robotics", "slam", "autonomous driving"],
-      "ir_nlp_terms": ["retrieval", "search", "ranking", "nlp", "recommendation", "information retrieval"]
+      "ir_nlp_nodes": ["N1 Retrieval & Search", "N3 Ranking & Recommendation / LTR", "N6 NLP / IR foundations"]
     }
   },
 
@@ -47,12 +58,20 @@
     "Birlasoft", "Coforge", "Zensar", "IBM Global Services", "NTT Data"
   ],
 
-  "logistics_buckets": {
-    "office": ["Pune", "Noida"],
-    "welcome": ["Hyderabad", "Mumbai", "Delhi NCR", "Delhi", "New Delhi", "Gurgaon", "Gurugram"]
+  "anti_signal_concerns": {
+    "research_only": "a research/academic background with little production deployment evidence",
+    "consulting_only": "a consulting-services career, where the work content is harder to verify",
+    "langchain_only": "recent LLM-wrapper work without earlier ML production evidence",
+    "framework_tutorial": "tutorial- or demo-level evidence rather than shipped systems",
+    "title_chasing": "several short completed roles rather than sustained ownership",
+    "no_recent_handson": "a senior or managerial title with little recent hands-on evidence",
+    "cv_speech_robotics": "a vision/speech focus rather than retrieval, ranking or NLP"
   },
-  "logistics_target_cities": [
-    "Pune", "Noida", "Hyderabad", "Mumbai", "Delhi NCR", "Delhi",
-    "New Delhi", "Gurgaon", "Gurugram"
-  ]
+
+  "logistics": {
+    "home_country": "India",
+    "office": ["Pune", "Noida"],
+    "welcome": ["Hyderabad", "Mumbai", "Delhi NCR", "Delhi", "New Delhi", "Gurgaon", "Gurugram"],
+    "preferred_work_modes": ["hybrid", "flexible", "onsite"]
+  }
 }

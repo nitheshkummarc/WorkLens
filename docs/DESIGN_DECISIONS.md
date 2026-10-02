@@ -1,245 +1,148 @@
-# DESIGN_DECISIONS
+# Design Decisions
 
-Why the system is built the way it is — per module, with the alternatives we
-considered and why we rejected them. Written for the Stage-5 "defend your work"
-interview. Every number cited lives in `shared/config/scoring.py` or the `data/`
-files; nothing here is hand-waving.
+Why the system is built the way it is: the choice made in each module, the alternatives considered, and why they were rejected. Every number below comes from `shared/config/scoring.py`, the `data/` files, or a measurement on the provided 100K pool.
 
 ---
 
-## 0. The one idea everything hangs on
+## 0. The central idea
 
-A real recruiting pool is full of **keyword stuffers** (an HR Manager who lists
-"9 AI core skills") and **plain-language strong fits** (a "Recommendation Systems
-Engineer" who never writes the buzzword "RAG"). A system that scores the *skills
-list* ranks the stuffers first — which is exactly what the provided
-`sample_submission.csv` does (HR Manager at rank 1).
+A recruiting pool contains **keyword stuffers**, such as an HR Manager listing a dozen AI skills, and **plain-language strong fits**, such as a Recommendation Systems Engineer who never writes "RAG". A system that scores the skills list ranks the stuffers first. The provided `sample_submission.csv` shows this: its rank 1 is a Project Manager, and 98 of its 100 candidates have non-AI current titles.
 
-Our answer: **score what a candidate demonstrably did in their career history, not
-what they claim in a skill list.** A node reaches full strength only from career
-descriptions/titles (or an assessment-verified skill); unvalidated skill lists are
-capped at half credit. We verified this on the real data: of the 100 candidates the
-sample submission ranks, **0** appear in our top-100; the 71 non-AI stuffers in it
-average a final score of 0.12.
-
-Everything below serves that idea.
+WorkLens instead **scores what a candidate demonstrably did in their career history.** A capability area reaches full strength only from career titles and descriptions, or from an assessment-verified skill backed by the career history; self-reported evidence is capped at half credit. On the provided pool, none of the sample submission's 100 candidates appear in WorkLens's top 100, and the 98 with non-AI titles average a final score of 0.10 (the top-100 cutoff is about 0.58).
 
 ---
 
-## Ranking approach — the algorithmic story ("how did you achieve the ranking?")
+## Ranking approach
 
-**Short answer: a custom, from-scratch scoring engine with a streaming Top-K
-selector — no ML, no embeddings, no external search engine.** Concretely:
+WorkLens is a hand-built scoring function plus a streaming top-K selector. It uses no ML model, no embeddings and no external search engine.
 
-- **Not TF-IDF / BM25.** Those rank by corpus term-frequency statistics. We score
-  each candidate against a *curated capability ontology* with deterministic phrase
-  matching; the weights come from the JD's emphasis, not corpus statistics.
-- **Not cosine / embeddings.** No vectors at ranking time (the N10 embedding node is
-  specified but off in v1) — it's CPU-only and network-off.
-- **Not a graph algorithm.** No PageRank/traversal; candidates are scored
-  independently.
-- **It is a custom feature-scoring model + an efficient selection algorithm:**
-  1. **Phrase/ontology matching (hand-rolled).** For each of 9 capability areas we
-     precompile a `PhraseGroup` and scan the candidate text once with `str.find` +
-     a manual word-boundary check — a tiny inverted-vocabulary scan. O(#phrases ×
-     text) per candidate, compiled once at startup; it replaced a per-phrase regex
-     approach for a measured **6.7× speedup** (Phase 1B).
-  2. **Feature scoring (linear + multiplicative).** An importance-weighted linear
-     sum over node strengths gives `base_capability`; experience/ML-depth factors
-     and anti-signal penalties adjust it; a bounded behavioral multiplier rescales.
-  3. **Streaming Top-K (the centerpiece).** A bounded min-heap of size 100 over the
-     stream keeps the best 100 in **O(N log K)** time and **O(K)** memory — vs
-     O(N log N)/O(N) for a full sort — with an id-ascending tie-break in eviction.
+- **Not TF-IDF or BM25.** Those rank by corpus term statistics. WorkLens scores each candidate against a curated capability ontology, with weights taken from the job description's emphasis.
+- **Not embeddings or cosine similarity.** No vectors are computed at ranking time; the run is CPU-only and offline.
+- **What it is:**
+  1. **Phrase matching against an ontology.** For each of the 9 capability areas a `PhraseGroup` is built once at startup. Each candidate's text is lower-cased once and scanned with `str.find`, plus word-boundary checks.
+  2. **A linear and multiplicative scoring function.** An importance-weighted sum of node strengths gives `base_capability`. Experience and ML-depth factors and anti-signal penalties adjust it, and a bounded behavioral multiplier rescales it.
+  3. **Streaming top-K.** A min-heap of size 100 keeps the best candidates in O(N log K) time, instead of the O(N log N) time and O(N) memory of a full sort. It breaks ties by ascending candidate id.
 
-So the "technical story" is the good one: an **efficient ranking engine built from
-scratch** — a curated matcher + a linear/multiplicative scoring function + a
-streaming bounded-heap Top-K — chosen over BM25/cosine/graph because the 5-min /
-16-GB / CPU-only / no-network constraints reward algorithmic efficiency and
-explainability, and every ranking decision is defensible line by line.
+These choices fit the constraints (5 minutes, 16 GB, CPU only, no network) and keep every ranking decision traceable to a rule.
 
 ---
 
 ## Per-module rationale
 
-### `shared/config` — all constants in one file
-**Choice:** every numeric constant (importances, bands, penalties, weights,
-thresholds) in `scoring.py`; JD vocabulary in `data/jd_rubric.json`.
+### `shared/config`: all numbers in one file
+**Choice:** every numeric constant in `scoring.py`; role vocabulary in `data/jd_rubric.json`.
 **Alternative:** constants inline in each module.
-**Why not:** the constants *are* the model. Centralising them makes the whole scoring
-policy auditable on one screen and tunable without touching logic — and it made the
-sensitivity study a 5-line change.
+**Why not:** the constants are the model. Keeping them together makes the scoring policy reviewable in one place and tunable without touching logic. It also makes `tools/sensitivity.py` straightforward.
 
-### `shared/models` — Pydantic at every boundary
-**Choice:** validate the candidate against the schema on read; validate every
-inter-module object.
-**Alternative:** parse raw dicts, trust the data.
-**Why not:** 100K synthetic records will contain malformed/edge rows. Validating at
-the boundary turns "silent wrong score" into "skipped + logged", and the typed models
-are the contract between the two of us building in parallel.
+### `shared/models`: Pydantic between stages
+**Choice:** validate each candidate on read, and pass typed models between stages, including the rubric vocabulary inside `JDProfile`.
+**Alternative:** pass raw dicts.
+**Why not:** a 100K synthetic pool can contain malformed rows. Validating at the boundary turns a silently wrong score into a skipped, logged record. The typed models also served as the contract between the two people building the stages in parallel.
 
-### `shared/utils/phrase_matcher` — pure-Python `PhraseGroup`
-**Choice:** ordered `str.find` with a manual word-boundary check, grouped per node.
-**Alternatives benchmarked:** per-phrase `re.search`; a single union regex per node.
-**Why not:** profiling (Phase 1B) showed ~87% of runtime in `re.Pattern.search`. The
-union regex is faster but its match-ordering differs from "first phrase in tuple
-order", so it would *change scores*. The pure-Python group preserves exact semantics
-(405,440 comparisons, 0 mismatch) and is **6.7× faster** — module2 dropped from
-~292s to ~44s per 100K. We kept the legacy regex functions for equivalence testing.
+### `shared/utils/phrase_matcher`: `str.find` instead of regex
+**Choice:** ordered `str.find` with explicit word-boundary checks, grouped per node.
+**Alternatives:** one `re.search` per phrase; one union regex per node.
+**Why not:** profiling during development showed most of the runtime in regex search. A union regex reports the leftmost match in the text, not the first phrase in list order, so it would change which evidence phrase is reported. `str.find` keeps the semantics exactly. `tests/test_phrase_matcher.py` checks it against a regex reference implementation.
 
-### `module1_jd_rubric` — build the rubric once
-**Choice:** importances are **node-specific weights** (1.0/0.9/0.7/0.5/0.4/0.3), from
-the JD's emphasis, built into one immutable `JDProfile` at startup.
-**Alternative:** flat tiers (every "must-have" = 1.0); or re-deriving per candidate.
-**Why not flat tiers:** the JD is not flat — it calls rigorous evaluation (NDCG/MRR)
-"non-negotiable" but a *supporting* discipline, so N4 = 0.9, between the 1.0
-build-core and the 0.7 of NLP foundations.
-**Why once:** re-deriving per candidate would blow the runtime budget.
+**Caching per text part.** The pool's 300,171 career entries contain only 340 distinct role texts. module2 therefore matches each distinct part once through an LRU-cached `PhraseIndex` and scores by set lookups. This is exact because no phrase spans a newline. module2 went from about 40 s to about 5 s, and the full run is about 2.8× faster. `tools/bench_matcher.py` confirms identical profiles against a regex reference with the same rules (612.7 s → 5.7 s on 100K). Details are in PERFORMANCE.md.
 
-### `module2_capability` — the precision lever
-**Choice:** node strength ∈ {0, 0.5, 1.0}. **1.0** needs a *strong* phrase in
-demonstrated text (career history) or an assessment-verified skill (≥50); **0.5** for
-a strong phrase only claimed, or a weak/ambiguous phrase in demonstrated text; **0.0**
-otherwise. `base_capability` = importance-weighted mean.
-**Alternatives:** (a) count skills; (b) any phrase anywhere = full credit; (c)
-embeddings.
-**Why not (a):** that is the sample-submission stuffer trap.
-**Why not (b):** "production" in a *manufacturing* description, or "search" in a SQL
-one, would fake AI capability — requiring a *strong* phrase in descriptions stops that
-(a Mechanical Engineer lands at 0.17, not the top).
-**Why not (c) here:** embeddings need a model + offline precompute; out of scope for
-v1. Assessment-gating is *secondary* — only 24% of candidates have any assessment
-scores, so description content carries the defense.
+**Matching rule:** a phrase must start at a word boundary, so "search" does not match inside "research" and "serving" does not match inside "observing". Short phrases (four characters or fewer) must also end at one.
 
-### `module3_capability_fit` — adjustments, multiplicative
-**Choice:** `clamp01(base · experience_factor · ml_depth_factor − anti_penalty +
-nice_bonus)`. Experience peaks at the JD's 5–9yr band; `ml_depth_factor` (0.85–1.10)
-rewards *years actually in ML* vs total seniority; anti-signals subtract.
-**Alternative:** additive capability + experience + behaviour in one weighted sum.
-**Why not additive:** a candidate could buy back a missing must-have with seniority
-and engagement. Multiplicative keeps capability primary — you cannot be a top fit
-without the core.
-**`ml_depth_factor`, why:** two people with identical strong retrieval evidence — one
-with 5 ML years, one with a 6-month pivot — get the same `base_capability`; the JD
-wants "4–5 years *in applied ML*", so this axis separates them. It only multiplies
-(can't lift a weak base), and setting it to 1.0 reproduces the prior version — a clean
-disableable surface.
+### `module1_jd_rubric`: build the rubric once
+**Choice:** node-specific importances (1.0, 0.9, 0.7, 0.5, 0.4, 0.3), built into one `JDProfile` at startup. The builder validates the rubric against the ontology and the constants.
+**Alternative:** flat tiers (every must-have = 1.0), or recomputing per candidate.
+**Why not flat tiers:** the job description is not flat. It calls rigorous evaluation (NDCG/MRR) non-negotiable but supporting, so N4 = 0.9, between the 1.0 build core and NLP foundations at 0.7.
 
-### `module4_behavioral` — a bounded multiplier, not a score
-**Choice:** 8 sub-scores → `behavioral_raw` → `multiplier = 0.5 + 0.5·raw ∈
-[0.5, 1.0]`. Uses 14 of the 23 signals; `skill_assessment_scores` feeds capability
-(module2) instead. The other **8 are deliberately unused**: profile_completeness,
-signup_date, profile_views, applications, connections, endorsements, salary, and
-`github_activity_score`.
-**Alternative:** use all 23 signals; or make behaviour additive/decisive.
-**Why omit 8:** connections/endorsements are gameable vanity; completeness/views/
-applications are weak quality signals; salary is a negotiation/fit field, not quality;
-and `github_activity_score` is `-1` for most of the pool (no GitHub), so it's sparse
-and noisy. Feeding more signals into a multiplier only adds variance, not signal — so
-the 14 predictive ones are used and the rest are left out.
-**Why a bounded multiplier:** the signals doc says treat behaviour as "a multiplier or
-modifier on top of skill-match." The 0.5 floor means a stale-but-strong candidate is
-*halved, not deleted* — and a "behavioural twin" with better availability can beat its
-twin by up to 2×. That matches the JD's "down-weight the unavailable".
+### `module2_capability`: graded evidence
+**Choice:** node strength in {0, 0.5, 1.0}.
+- **1.0** needs a strong phrase in career history, or an advanced/expert skill with an assessment ≥ 50 that the career history at least loosely supports.
+- **0.5** is for a strong phrase only in self-reported text, an assessed skill with no career support, or only a weak phrase in career history.
+- **0.0** otherwise.
 
-### `module5_honeypot` — two rules, on purpose
-**Choice:** H1 (≥3 advanced/expert skills with `duration_months == 0`) and H2
-(Σ tenure > yoe·12·1.5 + 12). Honeypot ⇒ final 0.
-**Alternative:** the earlier six-rule draft (reversed dates, education-before-work,
-skill-duration mismatch, …).
-**Why not six:** measured on the full 100K, the extra rules fired on **16.9%** of the
-pool — a false-positive machine on independently-sampled synthetic data. H1+H2 fire on
-**0.043%** (43/100K), matching the spec's stated ~80, and every trigger is genuinely
-impossible. We *under*-flag on purpose: safe side of the >10%-in-top-100 DQ, and any
-honeypot we miss still scores low on capability anyway. A keyword stuffer is **not** a
-honeypot — it is sunk by module2, not floored here.
+Each result records its source (`career`, `skill_verified`, `claimed`, `career_weak`, `none`) so the reasoning can describe it accurately.
 
-### `module6_ranking` — streaming bounded heap
-**Choice:** a size-100 min-heap over the stream; `final = honeypot?0:fit·mult`; sort
-the retained 100 by `(round(score,6) desc, candidate_id asc)`.
-**Alternative:** score all 100K into a list and full-sort.
-**Why not:** that is O(N) memory and O(N log N) time for 99.9% wasted work — we only
-need the top 100. The heap is O(K) memory / O(N log K). The heap also carries each
-candidate's full profile objects, so reasoning runs on the retained 100 with **no
-second pass**. Tie-break by id-ascending is baked into both the heap eviction and the
-final sort, so the CSV satisfies the validator by construction.
+**Context.** A phrase inside a comparison or a statement of non-experience is not evidence: "lighter weight than ranking systems at FAANG", "interested in transitioning toward NLP". A match is ignored when a cue word (than, toward, not, no, never, without) appears among the three words before it in the same clause. This is a heuristic, not a parser; on the provided pool it suppresses four patterns, all correctly (SCORING_DESIGN.md, section 1.2).
 
-### `module7_reasoning` — deterministic template, not an LLM
-**Choice:** a fact-grounded template — title, years, top demonstrated strengths (with
-a real evidence phrase), one behavioural note, one honest concern; tone leads with
-strengths for high ranks and with the concern for low ranks.
-**Alternative:** generate reasoning with an LLM.
-**Why not:** an LLM at rank time breaks the no-network/5-min constraint and risks
-hallucination — the explicit Stage-4 failure mode. Every clause here is pulled from
-the candidate's own fields (verified: 100/100 rows, 0 hallucinations), it varies per
-candidate (100/100 distinct), and the tone tracks the rank.
+**Why assessed skills need career support.** The job asks for work "deployed to real users". An assessment shows knowledge, not delivery, so on its own it counts as a claim.
+**Alternatives:** (a) count skills; (b) any phrase anywhere earns full credit; (c) embeddings.
+**Why not (a):** that is the sample submission's failure mode.
+**Why not (b):** "production" in a manufacturing description, or "search" in a SQL role, would fake AI capability. Across 5,791 Mechanical Engineers the mean final score is 0.09.
+**Why not (c):** embeddings need a model and offline pre-computation; they are out of scope for v1. Assessment gating is secondary because only 24% of candidates have any assessment scores.
 
-### `module8_submission` — validate, then write
-**Choice:** a hard gate that re-checks all official-validator rules + pool membership
-+ "scores not all identical" + non-empty reasoning, and aborts the run on any failure
-before writing.
-**Alternative:** trust module6's construction and just write.
-**Why not:** "valid by construction" is an assumption; the gate is a *test*. It costs
-microseconds and removes the single worst outcome — a silently malformed CSV that
-auto-rejects at Stage 1 and burns one of only three submissions.
+### `module3_capability_fit`: multiplicative adjustments
+**Choice:** `clamp01((base × experience_factor × ml_depth_factor − anti_penalty + nice_bonus) / 1.2)`, where 1.2 is the largest value the numerator can reach. Dividing instead of clamping keeps the strongest profiles distinct; with a plain clamp, 8 of the top 10 tied at 1.0 and behaviour alone ordered them.
+**Alternative:** one additive sum of capability, experience and behaviour.
+**Why not additive:** a candidate could make up for a missing core capability with seniority and engagement. Multiplying keeps capability primary.
+
+**`ml_depth_factor`:** two candidates with identical retrieval evidence, one with five ML years and one with a six-month pivot, have the same `base_capability`. The job asks for 4-5 years of applied ML, so this factor separates them. It only multiplies, so it cannot lift a weak base. ML tenure is capped at stated experience so that overlapping roles cannot inflate it.
+
+**Anti-signals:** seven rules from the job description's "do not want" list. Only `research_only` is a hard disqualifier. `consulting_only` is a soft penalty (−0.125), because in this data the employer name is not correlated with the work described. `title_chasing` counts only completed roles: a candidate who recently started a new job is not job-hopping. `langchain_only` does not fire when the career shows retrieval or ranking work, which is the job description's own exemption; without that check all 12 of its firings hit candidates with production retrieval experience. On the provided pool, five of the seven rules never fire (SCORING_DESIGN.md, section 3). They are kept because they encode real requirements and are covered by tests.
+
+### `module4_behavioral`: a bounded multiplier
+**Choice:** eight sub-scores → `behavioral_raw` → `multiplier = 0.5 + 0.5 × raw`, in [0.5, 1.0]. It uses 14 of the 23 signals; `skill_assessment_scores` feeds capability instead.
+**Not used:** `profile_completeness_score`, `signup_date`, `profile_views_received_30d`, `applications_submitted_30d`, `connection_count`, `endorsements_received`, `expected_salary_range_inr_lpa`, `github_activity_score`.
+**Why:**
+- Connections and endorsements are easy to inflate.
+- Completeness, views and applications say little about quality.
+- Salary is a negotiation field, not a quality signal.
+- `github_activity_score` is −1 (no GitHub) for 64.6% of the pool.
+
+**Why a bounded multiplier:** the signals documentation describes behaviour as a modifier on top of skill match, so capability stays the primary axis.
+
+**Two explicit availability rules.** The job description says a candidate inactive for six months with a 5% response rate "is, for hiring purposes, not actually available", and that the company does not sponsor work visas. A weighted sum understated both: an unresponsive candidate kept about 0.73 of their score, and being abroad cost 1-2%. So a candidate inactive for more than 180 days or with a response rate below 0.10 gets the floor multiplier (0.5), and a candidate outside the home country has the multiplier scaled by 0.8. Both thresholds and the factor are in `scoring.py`; the home country is in the rubric.
+
+### `module5_honeypot`: two rules
+**Choice:** H1 (≥ 3 advanced/expert skills with `duration_months == 0`) and H2 (total tenure > `yoe × 12 × 1.5 + 12`). A honeypot scores 0.
+**Alternative:** an earlier draft with six rules (reversed dates, education after work, skill-duration mismatch and others; not in the repository).
+**Why not:** on the 100K pool the extra rules flagged about 17% of candidates, mostly false positives on independently sampled synthetic data. H1 and H2 flag 43 (0.043%), close to the roughly 80 the specification mentions, and each is genuinely impossible. Under-flagging is the safe side of the "more than 10% honeypots in the top 100" disqualification. A missed honeypot usually scores low on capability anyway.
+
+### `module6_ranking`: streaming bounded heap
+**Choice:** a size-K min-heap over the stream (K = 100 by default, `--top-k`); `final = 0 if honeypot else round(fit × multiplier, 6)`; the retained entries are sorted by score descending, then id ascending.
+**Alternative:** score all 100K into a list and sort.
+**Why not:** that keeps every record in memory and sorts 100K entries to use 100. The heap also carries each retained candidate's scoring objects, so reasoning needs no second pass. Scores are rounded before they enter the heap, so eviction and final ordering compare exactly the value written to the CSV. The tie-break compares candidate ids as strings (reversed inside the heap), so it works for any id format.
+
+### `module7_reasoning`: a template, not an LLM
+**Choice:** a deterministic template with title, years, strongest capability areas (with an evidence phrase), recent activity and the most significant gap.
+**Alternative:** generate the text with an LLM.
+**Why not:** an LLM call at ranking time breaks the no-network and time constraints, and risks invented claims. Each clause here comes from the candidate's fields or a matched phrase. Partial evidence is worded by its source ("only self-reported" or "only indirect … in career history"), and behavioural gaps are named when they are the reason. When there is no gap the line says so, rather than filling a "Concern" slot. `tests/test_reasoning.py` covers these cases.
+
+### `module8_submission`: validate, then write
+**Choice:** check every official validator rule, plus pool membership, non-identical scores and non-empty reasoning, before writing; abort with exit code 1 on failure. The writer also guards against spreadsheet formula injection.
+**Alternative:** trust module 6's construction.
+**Why not:** "valid by construction" is an assumption, and the check costs microseconds. It prevents a malformed CSV from being submitted.
 
 ---
 
-## Calibration robustness (addressing the obvious objection)
+## Calibration robustness
 
-The constants are reasoned from the JD, not tuned on a gold set (none exists). So:
-**how much does the ranking depend on the exact numbers?** We perturbed importances by
-±15% and the experience/ML-depth factors by ±0.05, 8 trials over an 8,000 sample:
+The constants are reasoned from the job description, not fitted to labelled data (none exists). To measure how much the ranking depends on their exact values, `tools/sensitivity.py` re-ranks the first 8,000 candidates under 8 random perturbations (seed 0). Node importances are scaled by ±15%, and the experience and ML-depth factors are shifted by ±0.05:
 
-| | mean overlap with baseline |
-|---|---|
-| top-10 | **97.5%** |
-| top-50 | **97.5%** |
-| top-100 | **95.4%** |
-| rank correlation (shared top-100) | **~0.96–0.99** |
+| | mean overlap with the unperturbed ranking | worst trial |
+|---|---|---|
+| top 10 | 96.3% | 90% |
+| top 50 | 95.2% | 92% |
+| top 100 | 96.5% | 94% |
+| Spearman correlation on the shared top 100 | 0.93-0.99 | |
 
-The top-10 — which drives 50% of the composite via NDCG@10 — is essentially stable
-under realistic mis-calibration. The exact weights are not load-bearing; the
-*structure* (description-primary, capability-primary, honeypot floor) is.
+The top 10, which carries the most weight in NDCG@10, is stable under realistic mis-calibration. The structure (career-first evidence, capability-first scoring, honeypot floor) matters more than the exact weights.
 
 ---
 
-## Known limitations (honest)
+## Known limitations
 
-1. **Calibration is reasoned, not ground-truth-tuned.** Mitigated, not eliminated, by
-   the robustness above. If a local gold set ever exists, the constants in `scoring.py`
-   are the single tuning surface.
-2. **No semantic recall.** Embeddings are off (the design's gated N10 node). A strong
-   candidate phrasing their work entirely outside our vocabulary can be under-scored.
-   Softened by weak/plain-language phrases, but it's the main recall gap and most
-   affects NDCG@50 / MAP. The intended fix is the N10 node: offline-precomputed
-   embeddings (precompute is allowed by spec §107) loaded as a millisecond lookup at
-   rank time, added only as a recall booster that never bypasses honeypot/anti-signal
-   logic.
-3. **Behavioural cliffs.** The recency band has a hard edge at 90 days; a candidate one
-   day over can drop a tier. Bounded by the 0.5 multiplier floor; intended per the JD's
-   down-weighting language.
-4. **Honeypot generalisation.** 0.043% is validated on the public pool, not the hidden
-   ground truth, which may contain patterns H1/H2 don't cover. We under-flag
-   deliberately so we cannot trip the DQ.
+1. **Calibration is reasoned, not fitted.** The sensitivity check bounds the risk but does not remove it. If labelled data becomes available, `scoring.py` is the single place to tune.
+2. **No semantic recall.** Embeddings are not used. A strong candidate who describes their work entirely outside the ontology's vocabulary can be under-scored. The planned fix is an offline-precomputed embedding lookup (pre-computation is allowed by the specification), used only to add recall, never to bypass honeypot or anti-signal logic.
+3. **Behavioural cliffs.** Recency bands have hard edges; one day past 90 days drops a band. The 0.5 multiplier floor limits the effect.
+4. **Honeypot coverage.** H1 and H2 were checked on the public pool only; the hidden evaluation may contain other patterns. The rules under-flag deliberately.
+5. **Must-haves are weighted, not required.** RANKING_REVIEW.md checks every top-100 candidate against the job description. After the post-review fixes the top 10 are all strong matches, but a few candidates with broad production ML and no retrieval or embedding work remain in the lower part of the top 100.
+6. **Inactive anti-signals.** Five rules do not fire on the provided pool. Their vocabulary was not tuned to this data, to avoid fitting rules to one synthetic sample.
 
 ---
 
-## Questions we expect in the interview
+## Questions to expect
 
-- *Why does an HR Manager with 9 AI skills score 0?* → module2: no AI in the career
-  descriptions; skill list capped at 0.5 and gated by assessments.
-- *Why is consulting only a −0.125 soft penalty, not a DQ?* → in this dataset the
-  employer is decorrelated from the work content (descriptions are templated), so the
-  company name alone must not zero a candidate; real consultants with only generic
-  skills are already sunk by low base capability.
-- *Why 0.9 for evaluation and not 1.0?* → the JD treats rigorous ranking evaluation as
-  non-negotiable but supporting, not a primary build deliverable.
-- *What if your weights are wrong?* → the sensitivity table: top-10 is 97.5% stable
-  under ±15%.
-- *The JD lists a "closed-source 5+ years without external validation" disqualifier
-  (line 049) — why don't you enforce it?* → it keys on the absence of a public signal
-  (papers/talks/GitHub), and 64.6% of the pool has no GitHub at all, so the rule fires
-  on a majority and is a false-positive machine on this synthetic data. We deliberately
-  omit it; genuinely weak closed-source profiles are already sunk by low demonstrated
-  capability. (Python-as-a-skill and HR-tech/OSS domain are omitted for the same
-  "low discrimination / not a capability axis" reason.)
+- *Why doesn't an HR Manager with nine AI skills rank?* Their career text has no AI content, so those skills count only as self-reported (0.5). They score about 0.22, against a top-100 cutoff of about 0.58.
+- *Why is consulting only a −0.125 soft penalty?* In this dataset the employer is not correlated with the work described, so the company name alone must not sink a candidate. Consultants with only generic experience already score low.
+- *Why 0.9 for evaluation rather than 1.0?* The job treats rigorous evaluation as non-negotiable but supporting, not a primary deliverable.
+- *What if the weights are wrong?* See the sensitivity table: the top 10 is about 96% stable under ±15% perturbation.
+- *Why isn't the "closed-source for 5+ years without external validation" disqualifier enforced?* It depends on the absence of public signals such as GitHub, and 64.6% of the pool has no GitHub, so it would flag the majority. Weak closed-source profiles already score low on demonstrated capability.

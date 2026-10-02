@@ -1,18 +1,17 @@
-"""One CSV row — output of module8.
-
-The CSV has header candidate_id,rank,score,reasoning (UTF-8) plus exactly 100 rows.
-"""
+"""SubmissionRow: one row of the output CSV."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from shared.config.run_config import CANDIDATE_ID_PATTERN
+
 
 class SubmissionRow(BaseModel):
-    candidate_id: str = Field(pattern=r"^CAND_[0-9]{7}$")
-    rank: int = Field(ge=1, le=100)
+    candidate_id: str = Field(pattern=CANDIDATE_ID_PATTERN)
+    rank: int = Field(ge=1)
     score: float
-    reasoning: str              # from module7
+    reasoning: str
 
 
 __all__ = ["SubmissionRow"]
