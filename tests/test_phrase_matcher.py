@@ -2,23 +2,10 @@
 
 from __future__ import annotations
 
-import re
-
 import pytest
 
-from shared.config import scoring
 from shared.utils.phrase_matcher import PhraseGroup, PhraseIndex
-
-
-def _regex_first_match(text: str, phrases: tuple[str, ...]) -> str | None:
-    """Reference implementation without negation: one regex per phrase."""
-    for phrase in phrases:
-        stem = phrase.endswith("*")
-        core = re.escape(phrase[:-1] if stem else phrase)
-        bounded = not stem and len(phrase) <= scoring.SHORT_TERM_MAX_LEN
-        if re.search(rf"\b{core}\b" if bounded else rf"\b{core}", text, re.IGNORECASE):
-            return phrase
-    return None
+from tools.bench_matcher import regex_pattern
 
 
 CASES = [
@@ -36,16 +23,16 @@ CASES = [
     ("observing users", ("serving", "users")),
     ("data pipelines", ("pipeline",)),
     ("detokenization", ("tokeniz*",)),
-    ("beta then alpha", ("alpha", "beta")),
 ]
 
 
 @pytest.mark.parametrize("text,phrases", CASES)
 def test_matches_regex_reference(text, phrases):
+    lowered = text.lower()
+    expected = frozenset(p for p in phrases if regex_pattern(p).search(lowered))
     group = PhraseGroup(phrases)
-    expected = _regex_first_match(text, phrases)
-    assert group.first_match(text.lower()) == expected
-    assert group.any_match(text.lower()) == (expected is not None)
+    assert group.all_matches(lowered) == expected
+    assert group.any_match(lowered) == bool(expected)
 
 
 @pytest.mark.parametrize("text,matched", [

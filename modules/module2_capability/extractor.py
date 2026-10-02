@@ -24,6 +24,7 @@ from shared.models.candidate import Candidate, Skill
 from shared.models.capability import CapabilityProfile, NodeEvidence
 from shared.models.ontology import OntologyNode
 from shared.utils.phrase_matcher import PhraseIndex
+from shared.utils.text_fields import claimed_parts, demonstrated_parts
 
 _STRONG_PROFICIENCIES = ("advanced", "expert")
 
@@ -103,11 +104,8 @@ class CapabilityExtractor:
             s for s in candidate.skills
             if not (s.name in assessment and assessment[s.name] < scoring.STUFF_ASSESS_MIN)
         ]
-        profile = candidate.profile
-        match = self.index.matches_any_part
-        demo = match([profile.current_title]
-                     + [part for e in candidate.career_history for part in (e.title, e.description)])
-        claimed = match([profile.summary, profile.headline] + [s.name for s in kept_skills])
+        demo = self.index.matches_any_part(demonstrated_parts(candidate))
+        claimed = self.index.matches_any_part(claimed_parts(candidate, kept_skills))
         verified = self._verified_skills(kept_skills, assessment)
 
         evidences: list[NodeEvidence] = []

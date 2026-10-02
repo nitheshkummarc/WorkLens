@@ -26,14 +26,18 @@ from shared.models.capability import CapabilityProfile, NodeEvidence
 from shared.utils.jsonl_reader import CandidateReader
 from shared.utils.ontology_loader import load_ontology
 from shared.utils.phrase_matcher import _negated
-from shared.utils.text_fields import career_entry_text, claimed_text, demonstrated_text
+from shared.utils.text_fields import claimed_text, demonstrated_text
 from modules.module1_jd_rubric import build_jd_profile
 from modules.module2_capability import CapabilityExtractor
 
 
-def _pattern(phrase: str) -> re.Pattern[str]:
+def regex_pattern(phrase: str) -> re.Pattern[str]:
+    """Reference regex for one phrase under the PhraseGroup rules, without negation.
+
+    Matches lower-cased text, like PhraseGroup.
+    """
     stem = phrase.endswith("*")
-    core = re.escape(phrase[:-1] if stem else phrase)
+    core = re.escape((phrase[:-1] if stem else phrase).lower())
     bounded = not stem and len(phrase) <= scoring.SHORT_TERM_MAX_LEN
     return re.compile(rf"\b{core}\b" if bounded else rf"\b{core}")
 
@@ -44,7 +48,7 @@ class ReferenceExtractor:
     def __init__(self, nodes, ml_nodes) -> None:
         self.nodes = nodes
         self.importance_sum = sum(n.importance for n in nodes)
-        self.patterns = {p: _pattern(p) for n in nodes for p in n.strong_phrases + n.weak_phrases}
+        self.patterns = {p: regex_pattern(p) for n in nodes for p in n.strong_phrases + n.weak_phrases}
         self.ml_phrases = tuple(p for n in nodes if n.name in ml_nodes
                                 for p in n.strong_phrases + n.weak_phrases)
 
@@ -82,7 +86,7 @@ class ReferenceExtractor:
             evidences.append(ev)
             weighted += node.importance * ev.strength
         total = sum(e.duration_months for e in c.career_history
-                    if self._first(self.ml_phrases, career_entry_text(e).lower()) is not None)
+                    if self._first(self.ml_phrases, f"{e.title}\n{e.description}".lower()) is not None)
         return CapabilityProfile(
             candidate_id=c.candidate_id, node_strengths=evidences,
             base_capability=weighted / self.importance_sum,
