@@ -52,9 +52,9 @@
 
   "consulting_companies": [
     "TCS", "Tata Consultancy Services", "Infosys", "Wipro", "Accenture",
-    "Cognizant", "Capgemini", "HCL", "HCL Technologies", "Tech Mahindra",
+    "Cognizant", "Capgemini", "HCL", "Tech Mahindra",
     "LTIMindtree", "Mindtree", "L&T Infotech", "Larsen & Toubro Infotech",
-    "Mphasis", "DXC", "DXC Technology", "Hexaware", "Persistent Systems",
+    "Mphasis", "DXC", "Hexaware", "Persistent Systems",
     "Birlasoft", "Coforge", "Zensar", "IBM Global Services", "NTT Data"
   ],
 

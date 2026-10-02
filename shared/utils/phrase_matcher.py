@@ -45,14 +45,6 @@ class PhraseGroup:
         self.phrases = phrases
         self._specs: tuple[PhraseSpec, ...] = tuple(self._make_spec(p) for p in phrases)
 
-    def first_match(self, lowered: str) -> str | None:
-        """First phrase, in tuple order, found in `lowered`."""
-        contains = self._contains
-        for phrase, core, bounded in self._specs:
-            if core in lowered and contains(lowered, core, bounded):
-                return phrase
-        return None
-
     def any_match(self, lowered: str) -> bool:
         """True if any phrase occurs in `lowered`."""
         contains = self._contains

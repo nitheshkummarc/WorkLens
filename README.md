@@ -123,4 +123,4 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-34 test functions (94 cases) cover phrase matching and negation, every evidence tier, every anti-signal rule, behavioural scoring and availability rules, honeypot rules, top-K ranking, reasoning text, input reading, output validation, and end-to-end runs of `rank.py`. Repeated checks are table-driven (`pytest.mark.parametrize`). All tests build synthetic candidates in-process and do not need the candidate pool.
+34 test functions (93 cases) cover phrase matching and negation, every evidence tier, every anti-signal rule, behavioural scoring and availability rules, honeypot rules, top-K ranking, reasoning text, input reading, output validation, and end-to-end runs of `rank.py`. Repeated checks are table-driven (`pytest.mark.parametrize`). All tests build synthetic candidates in-process and do not need the candidate pool.
