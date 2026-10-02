@@ -1,37 +1,21 @@
-"""Per-candidate reasoning — module 7.
+"""Reasoning text for ranked candidates.
 
-A deterministic template engine: every claim is derived from the candidate's own
-fields or a matched evidence phrase, ensuring factual grounding. Output varies
-because the capability nodes, evidence, tenure, behavioral values, and concerns
-differ per candidate. The tone follows the rank: top candidates lead with
-strengths, lower-ranked candidates lead with the primary concern.
-
-Each line includes: title + years; up to three demonstrated strength areas (the
-first with a concrete evidence phrase) plus domain tenure when substantial; a
-behavioral note (recency, responsiveness, availability); and one specific concern
-(a fired anti-signal, a missing capability area, a long notice period, or a
-supplementary gap for otherwise-complete profiles).
+Template: title and years; up to three capability areas (first with its
+evidence phrase) and applied-ML tenure if >= 4 years; activity and response
+rate; the main gap, if any. The first half of the ranked list leads with
+strengths, the second half with the gap. Thresholds are in scoring.py and
+anti-signal wording in the rubric.
 """
 
 from __future__ import annotations
 
+from typing import Optional
+
+from shared.config import scoring
+from shared.models.capability import CapabilityProfile, NodeEvidence
 from shared.models.jd_profile import JDProfile
+from shared.utils.date_utils import days_since
 from modules.module6_ranking.ranker import RankedEntry
-
-# readable concern text per anti-signal key (honest, profile-grounded)
-_ANTI_CONCERN = {
-    "research_only": "research/academic background with little production-deployment evidence",
-    "consulting_only": "consulting-services career, where work content is harder to verify",
-    "langchain_only": "recent LLM-wrapper focus without earlier ML-production evidence",
-    "framework_tutorial": "tutorial/demo-level evidence rather than shipped systems",
-    "title_chasing": "several short stints rather than sustained ownership",
-    "no_recent_handson": "senior/managerial title with limited recent hands-on signal",
-    "cv_speech_robotics": "vision/speech focus rather than retrieval/NLP/IR",
-}
-
-_RANK_CONCERN_LEAD = 50   # ranks beyond this lead with the concern
-_ML_TENURE_YEARS = 4      # surface applied-ML tenure as a strength at/above this
-
 
 def _label(node_name: str) -> str:
     """'N1 Retrieval & Search' -> 'Retrieval & Search'."""
@@ -40,118 +24,132 @@ def _label(node_name: str) -> str:
 
 
 def _fmt_years(years: float) -> str:
-    return f"{years:g}"
+    return f"{round(years, 1):g}"
 
 
 def _cap_first(text: str) -> str:
-    return text[:1].upper() + text[1:] if text else text
+    return text[:1].upper() + text[1:]
+
+
+def _activity(days: int) -> str:
+    if days == 0:
+        return "active on the reference date"
+    return f"last active {days} day{'s' if days != 1 else ''} ago"
 
 
 class ReasoningGenerator:
-    """Builds the reasoning string for a ranked candidate; setup done once."""
+    """Build the reasoning string for a ranked candidate."""
 
-    def __init__(self, jd_profile: JDProfile) -> None:
-        self.critical = list(jd_profile.critical_nodes)
-        self.nice = list(jd_profile.nice_to_have_nodes)
+    def __init__(self, jd_profile: JDProfile, as_of_date: str,
+                 list_size: int = scoring.SUBMISSION_ROW_COUNT) -> None:
+        self.as_of = as_of_date
+        self.lead_with_strengths = max(1, list_size // 2)
+        self.concerns = jd_profile.anti_signal_concerns
         self.importance = {r.name: r.importance for r in jd_profile.required_capabilities}
+        self.critical = sorted(jd_profile.critical_nodes,
+                               key=lambda n: self.importance.get(n, 0.0), reverse=True)
+        self.nice = sorted(jd_profile.nice_to_have_nodes,
+                           key=lambda n: self.importance.get(n, 0.0), reverse=True)
 
-    def _ranked_present(self, capability) -> list:
-        present = [ev for ev in capability.node_strengths if ev.strength > 0]
-        present.sort(key=lambda ev: (ev.strength, self.importance.get(ev.node, 0.0)), reverse=True)
-        return present
-
-    # -- strengths -----------------------------------------------------------
-    def _strengths(self, entry: RankedEntry) -> str:
-        present = self._ranked_present(entry.capability)
+    def _strengths(self, capability: CapabilityProfile) -> str:
+        present = sorted(
+            (ev for ev in capability.node_strengths if ev.strength > 0),
+            key=lambda ev: (ev.strength, self.importance.get(ev.node, 0.0)),
+            reverse=True,
+        )
         if not present:
-            return "limited demonstrated AI/ML capability"
+            return "limited AI/ML capability evidence"
 
-        strong = [ev for ev in present if ev.strength == 1.0][:3]
-        weak = [ev for ev in present if ev.strength == 0.5]
+        strong = [ev for ev in present if ev.strength == scoring.NODE_STRENGTH_STRONG][:3]
+        partial = [ev for ev in present if ev.strength == scoring.NODE_STRENGTH_WEAK]
 
-        segments: list[str] = []
         if strong:
-            lead = strong[0]
-            names = [f"{_label(lead.node)} ({lead.evidence_phrase})"] + [_label(e.node) for e in strong[1:]]
-            segments.append("strong " + ", ".join(names))
-            if len(strong) < 2 and weak:
-                segments.append("emerging " + _label(weak[0].node))
+            names = [f"{_label(strong[0].node)} ({strong[0].evidence_phrase})"]
+            names += [_label(ev.node) for ev in strong[1:]]
+            text = "strong " + ", ".join(names)
+            if len(strong) < 2 and partial:
+                text += "; partial " + _label(partial[0].node)
         else:
-            lead = weak[0]
-            segments.append(f"emerging {_label(lead.node)} ({lead.evidence_phrase})"
-                            + (", " + ", ".join(_label(e.node) for e in weak[1:3]) if weak[1:3] else ""))
+            names = [f"{_label(partial[0].node)} ({partial[0].evidence_phrase})"]
+            names += [_label(ev.node) for ev in partial[1:3]]
+            text = "partial " + ", ".join(names)
 
-        text = "; ".join(segments)
-        ml_years = entry.capability.ml_relevant_months / 12.0
-        if ml_years >= _ML_TENURE_YEARS:
-            text += f"; ~{ml_years:.0f} yrs applied-ML tenure"
+        ml_years = capability.ml_relevant_months / 12.0
+        if ml_years >= scoring.REASON_ML_TENURE_YEARS:
+            text += f"; ~{_fmt_years(ml_years)} yrs applied-ML tenure"
         return text
 
-    # -- behavioral ----------------------------------------------------------
-    def _behavioral_note(self, entry: RankedEntry) -> str:
-        recency = entry.behavioral.recency
-        if recency >= 1.0:
-            phrase = "active in the last month"
-        elif recency >= 0.9:
-            phrase = "active recently"
-        elif recency >= 0.75:
-            phrase = "active this quarter"
-        elif recency >= 0.5:
-            phrase = "last active ~6 months ago"
-        else:
-            phrase = "limited recent activity"
+    def _behavior(self, entry: RankedEntry) -> str:
         sig = entry.candidate.redrob_signals
-        note = f"{phrase}, recruiter response {sig.recruiter_response_rate:.2f}"
+        note = (f"{_activity(days_since(sig.last_active_date, self.as_of))}, "
+                f"recruiter response rate {sig.recruiter_response_rate:.2f}")
         if sig.open_to_work_flag:
             note += ", open to work"
         return note
 
-    # -- concern (always specific) -------------------------------------------
-    def _concern(self, entry: RankedEntry) -> str:
-        strengths = {ev.node: ev.strength for ev in entry.capability.node_strengths}
+    @staticmethod
+    def _partial_evidence(node: str, ev: NodeEvidence) -> str:
+        if ev.source == "claimed":
+            return f"only self-reported {_label(node)} evidence"
+        return f'only indirect {_label(node)} evidence in career history ("{ev.evidence_phrase}")'
 
-        # 1) a fired anti-signal (most material honest concern)
+    def _concern(self, entry: RankedEntry) -> tuple[Optional[str], bool]:
+        """(gap or None, is_behavioral). Checked in priority order."""
+        evidence = {ev.node: ev for ev in entry.capability.node_strengths}
+        sig = entry.candidate.redrob_signals
+
         for key in entry.fit.anti_signals_fired:
-            if key in _ANTI_CONCERN:
-                return _ANTI_CONCERN[key]
-        # 2) the highest-importance Critical node with no evidence at all
-        missing = sorted((n for n in self.critical if strengths.get(n, 0.0) == 0.0),
-                         key=lambda n: self.importance.get(n, 0.0), reverse=True)
-        if missing:
-            return f"no demonstrated {_label(missing[0])} evidence"
-        # 3) logistics: a long notice period
-        notice = entry.candidate.redrob_signals.notice_period_days
-        if notice >= 90:
-            return f"long notice period ({notice} days)"
-        # 4) a Critical node claimed but not demonstrated in production
-        weak_critical = sorted((n for n in self.critical if strengths.get(n, 0.0) == 0.5),
-                               key=lambda n: self.importance.get(n, 0.0), reverse=True)
-        if weak_critical:
-            return f"{_label(weak_critical[0])} is claimed but not yet demonstrated in production"
-        # 5) core is fully covered — point at a nice-to-have gap or thin ML tenure
-        missing_nice = sorted((n for n in self.nice if strengths.get(n, 0.0) == 0.0),
-                              key=lambda n: self.importance.get(n, 0.0), reverse=True)
-        if missing_nice:
-            return f"limited {_label(missing_nice[0])} depth beyond the core"
-        ml_years = entry.capability.ml_relevant_months / 12.0
-        if ml_years < _ML_TENURE_YEARS:
-            return f"strong on the core but only ~{ml_years:.0f} yrs of applied-ML tenure"
-        return "very strong across the board; no material gap flagged"
+            if key in self.concerns:
+                return self.concerns[key], False
 
-    # -- public --------------------------------------------------------------
+        for node in self.critical:
+            if node in evidence and evidence[node].strength == scoring.NODE_STRENGTH_NONE:
+                return f"no demonstrated {_label(node)} evidence", False
+
+        days = days_since(sig.last_active_date, self.as_of)
+        behavioral = []
+        if days > scoring.REASON_STALE_DAYS:
+            behavioral.append(f"no platform activity in {days} days")
+        if sig.recruiter_response_rate < scoring.REASON_LOW_RESPONSE_RATE:
+            behavioral.append(f"a low recruiter response rate ({sig.recruiter_response_rate:.2f})")
+        if behavioral:
+            return " and ".join(behavioral), True
+
+        if sig.notice_period_days >= scoring.REASON_LONG_NOTICE_DAYS:
+            return f"a long notice period ({sig.notice_period_days} days)", False
+
+        for node in self.critical:
+            if node in evidence and evidence[node].strength == scoring.NODE_STRENGTH_WEAK:
+                return self._partial_evidence(node, evidence[node]), False
+
+        for node in self.nice:
+            if node in evidence and evidence[node].strength == scoring.NODE_STRENGTH_NONE:
+                return f"limited {_label(node)} depth", False
+
+        ml_years = entry.capability.ml_relevant_months / 12.0
+        if ml_years < scoring.REASON_ML_TENURE_YEARS:
+            return f"only ~{_fmt_years(ml_years)} yrs of applied-ML tenure", False
+
+        return None, False
+
     def reason(self, entry: RankedEntry) -> str:
-        if entry.honeypot.is_honeypot:  # defensive — honeypots score 0, shouldn't reach top-100
+        if entry.honeypot.is_honeypot:
+            # Reachable only when fewer than K candidates score above 0.
             return f"Profile flagged as implausible ({entry.honeypot.evidence}); not a credible fit."
 
-        title = entry.candidate.profile.current_title
-        yrs = _fmt_years(entry.candidate.profile.years_of_experience)
-        strengths = self._strengths(entry)
-        behavior = self._behavioral_note(entry)
-        concern = self._concern(entry)
+        profile = entry.candidate.profile
+        head = f"{profile.current_title}, {_fmt_years(profile.years_of_experience)} yrs"
+        strengths = self._strengths(entry.capability)
+        behavior = self._behavior(entry)
+        concern, behavioral_concern = self._concern(entry)
 
-        if entry.rank <= _RANK_CONCERN_LEAD:
-            return f"{title}, {yrs} yrs — {strengths}. {_cap_first(behavior)}. Concern: {concern}."
-        return f"{title}, {yrs} yrs — ranked here mainly due to {concern}. Still {strengths}; {behavior}."
+        if concern is None:
+            return f"{head} — {strengths}. {_cap_first(behavior)}. No material gap identified."
+        if entry.rank <= self.lead_with_strengths:
+            return f"{head} — {strengths}. {_cap_first(behavior)}. Concern: {concern}."
+        if behavioral_concern:
+            return f"{head} — main gap: {concern}. {_cap_first(strengths)}."
+        return f"{head} — main gap: {concern}. {_cap_first(strengths)}; {behavior}."
 
 
 __all__ = ["ReasoningGenerator"]

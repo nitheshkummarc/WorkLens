@@ -1,4 +1,4 @@
-"""Extract node strengths, base_capability, and ML tenure per candidate."""
+"""Extract node strengths, base_capability and ML tenure for each candidate."""
 
 from __future__ import annotations
 

@@ -1,22 +1,20 @@
-"""Score a candidate's demonstrated capability into a CapabilityProfile.
+"""Capability evidence per ontology node.
 
-Gives every ontology node a strength (0, 0.5, or 1.0), then combines them into an
-importance-weighted base_capability plus the relevant-ML tenure, in one text pass.
+Node strength, first rule that applies:
 
-Strength rules (description-primary, assessment-secondary):
+  1.0  career          strong phrase in career history
+  1.0  skill_verified  advanced/expert skill matching any node phrase, assessment >= 50,
+                       and a weak phrase for the node in career history
+  0.5  claimed         strong phrase in summary, headline or skills, or a verified
+                       skill without career support
+  0.5  career_weak     weak phrase in career history only
+  0.0  none
 
-  1.0  a strong phrase in demonstrated text (career titles/descriptions), or a
-       skill at advanced/expert whose assessment is >= 50.
-  0.5  a strong phrase only in claimed text (summary/headline/skills), or a
-       weak/ambiguous phrase in demonstrated text.
-  0.0  no evidence, or only a weak phrase in claimed text (the stuffer signature).
+Skills assessed below 30 are dropped first. ml_relevant_months sums roles that
+match any phrase of the rubric's ml_nodes, capped at stated experience.
 
-Requiring a strong phrase for the 1.0 case is what stops vague words like "search"
-or "data" in a non-AI description from counting as real AI capability. Skills that
-fail the <30 assessment gate are dropped before matching.
-
-Derived structures (importance sum, the N1-N7 ML-phrase set) are built once, so
-the per-candidate path does no setup.
+Text is matched per part (title, description, summary, skill name) through a
+cached PhraseIndex; repeated parts are not rescanned.
 """
 
 from __future__ import annotations
@@ -25,107 +23,97 @@ from shared.config import scoring
 from shared.models.candidate import Candidate, Skill
 from shared.models.capability import CapabilityProfile, NodeEvidence
 from shared.models.ontology import OntologyNode
-from shared.utils.phrase_matcher import PhraseGroup
-from shared.utils.text_fields import (
-    career_entry_text,
-    claimed_text,
-    demonstrated_text,
-)
-
-# the genuine applied-ML/AI nodes. N8 (data-eng) and N9 (scale-infra) alone do
-# NOT count a role as "applied ML".
-_ML_NODE_COUNT = 7  # N1..N7
+from shared.utils.phrase_matcher import PhraseIndex
 
 _STRONG_PROFICIENCIES = ("advanced", "expert")
 
 
-class CapabilityExtractor:
-    """Stateless-per-candidate extractor; derived constants computed once."""
+def _first_in(phrases: tuple[str, ...], found: frozenset[str]) -> str | None:
+    for phrase in phrases:
+        if phrase in found:
+            return phrase
+    return None
 
-    def __init__(self, nodes: list[OntologyNode]) -> None:
+
+class CapabilityExtractor:
+    """Build a CapabilityProfile per candidate."""
+
+    def __init__(self, nodes: list[OntologyNode], ml_nodes: list[str]) -> None:
         self.nodes = nodes
         self.importance_sum = sum(n.importance for n in nodes)
-        # N1–N7 strong+weak phrases, flattened once, for ML-relevance role tagging.
-        self.ml_phrases: tuple[str, ...] = tuple(
-            phrase
-            for node in nodes[:_ML_NODE_COUNT]
-            for phrase in (node.strong_phrases + node.weak_phrases)
+        self.index = PhraseIndex(tuple(p for n in nodes for p in n.strong_phrases + n.weak_phrases))
+        ml = set(ml_nodes)
+        self.ml_phrases = frozenset(
+            p for n in nodes if n.name in ml for p in n.strong_phrases + n.weak_phrases
         )
-        self.ml_group = PhraseGroup(self.ml_phrases)
-        self.strong_groups = {
-            node.name: PhraseGroup(node.strong_phrases)
-            for node in nodes
-        }
-        self.weak_groups = {
-            node.name: PhraseGroup(node.weak_phrases)
-            for node in nodes
-        }
-        self.all_phrase_groups = {
-            node.name: PhraseGroup(node.strong_phrases + node.weak_phrases)
-            for node in nodes
-        }
+        self.node_phrases = {n.name: frozenset(n.strong_phrases + n.weak_phrases) for n in nodes}
 
-    # -- node strength -------------------------------------------------------
     def _score_node(
         self,
         node: OntologyNode,
-        demo_text: str,
-        claimed: str,
-        kept_skills: list[Skill],
-        assessment: dict[str, float],
+        demo: frozenset[str],
+        claimed: frozenset[str],
+        verified: list[tuple[str, frozenset[str]]],
     ) -> NodeEvidence:
-        # 1.0 — strong phrase demonstrated in career history.
-        phrase = self.strong_groups[node.name].first_match(demo_text)
+        phrase = _first_in(node.strong_phrases, demo)
         if phrase is not None:
-            return NodeEvidence(node=node.name, strength=1.0,
-                                source="career_description", evidence_phrase=phrase)
+            return NodeEvidence(node=node.name, strength=scoring.NODE_STRENGTH_STRONG,
+                                source="career", evidence_phrase=phrase)
 
-        # 1.0: a validated skill (advanced/expert with assessment >= 50) matching the node.
-        node_phrases = self.all_phrase_groups[node.name]
-        for skill in kept_skills:
-            if (skill.proficiency in _STRONG_PROFICIENCIES
-                    and assessment.get(skill.name, -1.0) >= scoring.STRONG_ASSESS_MIN
-                    and node_phrases.any_match(skill.name)):
-                return NodeEvidence(node=node.name, strength=1.0,
-                                    source="skill_verified", evidence_phrase=skill.name)
+        node_phrases = self.node_phrases[node.name]
+        skill = next((name for name, found in verified if not found.isdisjoint(node_phrases)), None)
+        weak_career = _first_in(node.weak_phrases, demo)
+        if skill is not None and weak_career is not None:
+            return NodeEvidence(node=node.name, strength=scoring.NODE_STRENGTH_STRONG,
+                                source="skill_verified", evidence_phrase=skill)
 
-        # 0.5 — strong phrase claimed but not demonstrated.
-        phrase = self.strong_groups[node.name].first_match(claimed)
+        phrase = _first_in(node.strong_phrases, claimed) or skill
         if phrase is not None:
-            return NodeEvidence(node=node.name, strength=0.5,
-                                source="skill_unverified", evidence_phrase=phrase)
+            return NodeEvidence(node=node.name, strength=scoring.NODE_STRENGTH_WEAK,
+                                source="claimed", evidence_phrase=phrase)
 
-        # 0.5 — weak/ambiguous phrase, but in demonstrated work.
-        phrase = self.weak_groups[node.name].first_match(demo_text)
-        if phrase is not None:
-            return NodeEvidence(node=node.name, strength=0.5,
-                                source="career_description", evidence_phrase=phrase)
+        if weak_career is not None:
+            return NodeEvidence(node=node.name, strength=scoring.NODE_STRENGTH_WEAK,
+                                source="career_weak", evidence_phrase=weak_career)
 
-        # 0.0 — nothing, or only a weak phrase in claimed text (stuffer signature).
-        return NodeEvidence(node=node.name, strength=0.0, source="none", evidence_phrase=None)
+        return NodeEvidence(node=node.name, strength=scoring.NODE_STRENGTH_NONE,
+                            source="none", evidence_phrase=None)
 
-    # -- ML tenure -----------------------------------------------------------
     def _ml_relevant_months(self, candidate: Candidate) -> int:
-        total = 0
-        for entry in candidate.career_history:
-            if self.ml_group.any_match(career_entry_text(entry)):
-                total += entry.duration_months
-        return total
+        match = self.index.matches_any_part
+        total = sum(
+            entry.duration_months
+            for entry in candidate.career_history
+            if not match((entry.title, entry.description)).isdisjoint(self.ml_phrases)
+        )
+        return min(total, round(candidate.profile.years_of_experience * 12))
 
-    # -- public --------------------------------------------------------------
+    def _verified_skills(self, skills: list[Skill], assessment: dict[str, float]):
+        """(name, phrases found in name) for advanced/expert skills assessed >= 50."""
+        return [
+            (s.name, self.index.matches(s.name))
+            for s in skills
+            if s.proficiency in _STRONG_PROFICIENCIES
+            and assessment.get(s.name, -1.0) >= scoring.STRONG_ASSESS_MIN
+        ]
+
     def extract(self, candidate: Candidate) -> CapabilityProfile:
         assessment = candidate.redrob_signals.skill_assessment_scores
         kept_skills = [
             s for s in candidate.skills
             if not (s.name in assessment and assessment[s.name] < scoring.STUFF_ASSESS_MIN)
         ]
-        demo_text = demonstrated_text(candidate)
-        claimed = claimed_text(candidate, kept_skills)
+        profile = candidate.profile
+        match = self.index.matches_any_part
+        demo = match([profile.current_title]
+                     + [part for e in candidate.career_history for part in (e.title, e.description)])
+        claimed = match([profile.summary, profile.headline] + [s.name for s in kept_skills])
+        verified = self._verified_skills(kept_skills, assessment)
 
         evidences: list[NodeEvidence] = []
         weighted = 0.0
         for node in self.nodes:
-            ev = self._score_node(node, demo_text, claimed, kept_skills, assessment)
+            ev = self._score_node(node, demo, claimed, verified)
             evidences.append(ev)
             weighted += node.importance * ev.strength
 

@@ -1,14 +1,17 @@
-"""Find where phrases occur in a piece of text.
+"""Phrase matching on lower-cased text.
 
-Generic: it takes arbitrary phrase tuples and knows nothing about the AI ontology.
-Matching rules:
+Rules:
+  - A match must start at a word boundary ("search" does not match "research").
+  - Phrases of up to SHORT_TERM_MAX_LEN characters must also end at one
+    ("rag" does not match "ragged").
+  - Longer phrases may run into a longer word ("pipeline" matches "pipelines").
+  - A trailing "*" marks a stem ("tokeniz*").
+  - A match preceded, within NEGATION_WINDOW_WORDS words of the same clause,
+    by a word in NEGATION_CUES is ignored ("lighter weight than ranking
+    systems", "not in production").
 
-  - Short terms (<= SHORT_TERM_MAX_LEN chars) match on word boundaries, so "rag"
-    doesn't match inside "storage" and "map" doesn't match inside "roadmap".
-  - Longer terms match as substrings.
-  - A trailing "*" is a stem: "tokeniz*" matches "tokenizer"/"tokenization".
-
-Patterns compile once and are cached, so scanning 100K candidates never recompiles.
+PhraseGroup expects text that is already lower-cased. PhraseIndex lower-cases
+and caches per text.
 """
 
 from __future__ import annotations
@@ -18,52 +21,53 @@ from functools import lru_cache
 
 from shared.config import scoring
 
-Span = tuple[int, int]
-PhraseSpec = tuple[str, str, bool]
+PhraseSpec = tuple[str, str, bool]   # (original phrase, lower-cased core, needs word end)
+
+_CLAUSE_BREAKS = ".;:!?\n"
+_WORD = re.compile(r"[a-z0-9_]+")
+_LOOKBACK_CHARS = 80
 
 
-def _pattern_source(phrase: str) -> str:
-    """Return the regex source that implements the phrase's legacy match rule."""
-    stem = phrase.endswith("*")
-    core = phrase[:-1] if stem else phrase
-    escaped = re.escape(core)
-    if not stem and len(core) <= scoring.SHORT_TERM_MAX_LEN:
-        return rf"\b{escaped}\b"
-    return escaped
-
-
-@lru_cache(maxsize=8192)
-def _compile(phrase: str) -> re.Pattern[str]:
-    """Compile a case-insensitive pattern for one phrase (cached)."""
-    return re.compile(_pattern_source(phrase), re.IGNORECASE)
+def _negated(text: str, start: int) -> bool:
+    """True if a negation or comparison cue precedes `start` in the same clause."""
+    window = text[max(0, start - _LOOKBACK_CHARS):start]
+    cut = max(window.rfind(c) for c in _CLAUSE_BREAKS)
+    if cut >= 0:
+        window = window[cut + 1:]
+    words = _WORD.findall(window)[-scoring.NEGATION_WINDOW_WORDS:]
+    return any(w in scoring.NEGATION_CUES for w in words)
 
 
 class PhraseGroup:
-    """Fast exact-preserving matcher for a fixed phrase tuple.
-
-    The group keeps phrase-order semantics but avoids regex in the hot path.
-    Short-term word-boundary behavior mirrors the legacy regex matcher.
-    """
+    """Matcher for a fixed, ordered tuple of phrases."""
 
     def __init__(self, phrases: tuple[str, ...]) -> None:
         self.phrases = phrases
-        self._specs: tuple[PhraseSpec, ...] = tuple(
-            self._make_spec(phrase)
-            for phrase in phrases
-        )
+        self._specs: tuple[PhraseSpec, ...] = tuple(self._make_spec(p) for p in phrases)
 
-    def first_match(self, text: str) -> str | None:
-        """Return the same phrase as legacy `first_match`, with fewer full scans."""
-        lowered = text.lower()
+    def first_match(self, lowered: str) -> str | None:
+        """First phrase, in tuple order, found in `lowered`."""
+        contains = self._contains
         for phrase, core, bounded in self._specs:
-            if self._contains(lowered, core, bounded):
+            if core in lowered and contains(lowered, core, bounded):
                 return phrase
         return None
 
-    def any_match(self, text: str) -> bool:
-        """True if any phrase occurs in `text`."""
-        lowered = text.lower()
-        return any(self._contains(lowered, core, bounded) for _, core, bounded in self._specs)
+    def any_match(self, lowered: str) -> bool:
+        """True if any phrase occurs in `lowered`."""
+        contains = self._contains
+        for _, core, bounded in self._specs:
+            if core in lowered and contains(lowered, core, bounded):
+                return True
+        return False
+
+    def all_matches(self, lowered: str) -> frozenset[str]:
+        """Every phrase found in `lowered`."""
+        contains = self._contains
+        return frozenset(
+            phrase for phrase, core, bounded in self._specs
+            if core in lowered and contains(lowered, core, bounded)
+        )
 
     @staticmethod
     def _make_spec(phrase: str) -> PhraseSpec:
@@ -81,43 +85,41 @@ class PhraseGroup:
         if not core:
             return True
         start = text.find(core)
-        if not bounded:
-            return start != -1
         while start != -1:
             end = start + len(core)
             before_ok = start == 0 or not cls._is_word_char(text[start - 1])
-            after_ok = end == len(text) or not cls._is_word_char(text[end])
-            if before_ok and after_ok:
+            after_ok = not bounded or end == len(text) or not cls._is_word_char(text[end])
+            if before_ok and after_ok and not _negated(text, start):
                 return True
             start = text.find(core, start + 1)
         return False
 
 
-def first_match(text: str, phrases: tuple[str, ...]) -> str | None:
-    """Return the first phrase (in list order) that occurs in `text`, else None.
+class PhraseIndex:
+    """Phrases of a fixed vocabulary found in a text, cached per distinct text.
 
-    Cheaper than `match_phrases` when the caller only needs presence + one
-    example phrase (the common case in module2 node scoring).
+    Phrases never span a newline and the negation window stops at one, so the
+    matches in newline-joined parts equal the union of the matches in each
+    part. Callers match parts separately and union the results; repeated parts
+    are served from the cache.
     """
-    for phrase in phrases:
-        if _compile(phrase).search(text):
-            return phrase
-    return None
+
+    def __init__(self, phrases: tuple[str, ...], cache_size: int = 65_536) -> None:
+        if any("\n" in p for p in phrases):
+            raise ValueError("phrases must not contain newlines")
+        self._group = PhraseGroup(tuple(dict.fromkeys(phrases)))
+        self.matches = lru_cache(maxsize=cache_size)(self._matches)
+
+    def _matches(self, text: str) -> frozenset[str]:
+        return self._group.all_matches(text.lower())
+
+    def matches_any_part(self, parts) -> frozenset[str]:
+        """Union of the matches in each part."""
+        found: frozenset[str] = frozenset()
+        for part in parts:
+            if part:
+                found = found | self.matches(part)
+        return found
 
 
-def any_match(text: str, phrases: tuple[str, ...]) -> bool:
-    """True if any phrase occurs in `text`."""
-    return first_match(text, phrases) is not None
-
-
-def match_phrases(text: str, phrases: tuple[str, ...]) -> dict[str, list[Span]]:
-    """Find every phrase that occurs in `text`, with its match spans."""
-    found: dict[str, list[Span]] = {}
-    for phrase in phrases:
-        spans = [(m.start(), m.end()) for m in _compile(phrase).finditer(text)]
-        if spans:
-            found[phrase] = spans
-    return found
-
-
-__all__ = ["Span", "PhraseSpec", "PhraseGroup", "first_match", "any_match", "match_phrases"]
+__all__ = ["PhraseGroup", "PhraseIndex"]

@@ -1,14 +1,12 @@
-"""Candidate input model — mirrors candidate_schema.json.
-
-Parsed and validated by the JSONL reader, consumed by the scoring modules.
-Validating at the boundary means malformed records are caught early.
-"""
+"""Candidate input model, mirroring candidate_schema.json."""
 
 from __future__ import annotations
 
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+from shared.config.run_config import CANDIDATE_ID_PATTERN
 
 CompanySize = Literal[
     "1-10", "11-50", "51-200", "201-500",
@@ -32,8 +30,8 @@ class Profile(BaseModel):
 class CareerEntry(BaseModel):
     company: str
     title: str
-    start_date: str                      # ISO date "YYYY-MM-DD"
-    end_date: Optional[str] = None       # null when current
+    start_date: str                      # YYYY-MM-DD
+    end_date: Optional[str] = None       # null for the current role
     duration_months: int = Field(ge=0)
     is_current: bool
     industry: str
@@ -70,7 +68,7 @@ class Language(BaseModel):
 
 
 class RedrobSignals(BaseModel):
-    """All 23 platform/engagement signals."""
+    """The 23 platform engagement signals."""
 
     profile_completeness_score: float = Field(ge=0, le=100)
     signup_date: str
@@ -87,18 +85,18 @@ class RedrobSignals(BaseModel):
     expected_salary_range_inr_lpa: dict[str, float]
     preferred_work_mode: Literal["remote", "hybrid", "onsite", "flexible"]
     willing_to_relocate: bool
-    github_activity_score: float = Field(ge=-1, le=100)        # -1 = no github
+    github_activity_score: float = Field(ge=-1, le=100)        # -1: no GitHub linked
     search_appearance_30d: int = Field(ge=0)
     saved_by_recruiters_30d: int = Field(ge=0)
     interview_completion_rate: float = Field(ge=0, le=1)
-    offer_acceptance_rate: float = Field(ge=-1, le=1)          # -1 = no history
+    offer_acceptance_rate: float = Field(ge=-1, le=1)          # -1: no offer history
     verified_email: bool
     verified_phone: bool
     linkedin_connected: bool
 
 
 class Candidate(BaseModel):
-    candidate_id: str = Field(pattern=r"^CAND_[0-9]{7}$")
+    candidate_id: str = Field(pattern=CANDIDATE_ID_PATTERN)
     profile: Profile
     career_history: list[CareerEntry] = Field(min_length=1, max_length=10)
     education: list[Education] = Field(default_factory=list, max_length=5)

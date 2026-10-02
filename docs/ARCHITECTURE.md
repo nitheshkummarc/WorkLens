@@ -1,12 +1,12 @@
 # Architecture
 
-This document covers WorkLens's system design, data flow, module responsibilities, and the engineering rationale behind key decisions.
+System design, data flow and module responsibilities for WorkLens.
 
 ---
 
 ## System Overview
 
-WorkLens is a **deterministic, streaming scoring pipeline** that ranks candidates against a structured job specification. It processes 100,000 records in a single pass with constant memory overhead.
+WorkLens is a deterministic, streaming scoring pipeline that ranks candidates against a structured job specification. It processes the 100,000-record pool in a single pass and keeps only the top K candidate records in memory.
 
 ```mermaid
 graph LR
@@ -17,11 +17,11 @@ graph LR
         D["scoring.py constants"]
     end
 
-    subgraph "One-Time Setup"
+    subgraph "One-time setup"
         E["Module 1<br/>JD Profile Builder"]
     end
 
-    subgraph "Per-Candidate Streaming Loop"
+    subgraph "Per-candidate streaming loop"
         F["Module 2<br/>Capability Extraction"]
         G["Module 3<br/>Capability Fit"]
         H["Module 4<br/>Behavioral Scoring"]
@@ -29,16 +29,20 @@ graph LR
         J["Module 6<br/>Top-K Heap Insert"]
     end
 
-    subgraph "Post-Stream Finalization"
-        K["Module 7<br/>Reasoning Generation"]
+    subgraph "After the stream"
+        K["Module 7<br/>Reasoning"]
         L["Module 8<br/>Validation & Output"]
     end
 
     B --> E
     C --> E
     D --> E
-    E --> F
+    E --> G
+    E --> H
+    B --> F
     A --> F
+    A --> H
+    A --> I
     F --> G
     G --> J
     H --> J
@@ -48,31 +52,30 @@ graph LR
     L --> M["submission.csv"]
 ```
 
-**Key invariant:** Modules 2–6 run inside the streaming loop. Each candidate is scored, heap-inserted, and discarded — the full candidate pool is never held in memory. Only the top K (default 100) survive for reasoning and output.
+Modules 2-6 run inside the streaming loop. Each candidate is scored, offered to the heap and discarded; only the top K (default 100) remain for reasoning and output. The reader also keeps the set of candidate ids it has seen, used to drop duplicates and to check that every output id exists in the pool. That set is the only state that grows with the input (a few MB for 100K ids).
 
 ---
 
-## Module Dependency Graph
+## Module Dependencies
 
 ```mermaid
 graph TD
     subgraph "shared/"
-        SC["config/scoring.py<br/><i>All numeric constants</i>"]
-        SP["config/paths.py<br/><i>Project path resolution</i>"]
-        SR["config/run_config.py<br/><i>Runtime parameters</i>"]
-        M["models/*<br/><i>Pydantic schemas</i>"]
-        U["utils/*<br/><i>Phrase matcher, JSONL reader,<br/>date math, text assembly</i>"]
+        SC["config/scoring.py<br/><i>numeric constants</i>"]
+        SP["config/paths.py, run_config.py<br/><i>paths, candidate id format</i>"]
+        M["models/*<br/><i>Pydantic models</i>"]
+        U["utils/*<br/><i>phrase matcher, JSONL reader,<br/>text assembly, dates, clamp</i>"]
     end
 
     subgraph "modules/"
-        M1["module1_jd_rubric<br/><i>builder.py</i>"]
-        M2["module2_capability<br/><i>extractor.py</i>"]
-        M3["module3_capability_fit<br/><i>assembler.py, anti_signals.py</i>"]
-        M4["module4_behavioral<br/><i>scorer.py</i>"]
-        M5["module5_honeypot<br/><i>detector.py</i>"]
-        M6["module6_ranking<br/><i>ranker.py</i>"]
-        M7["module7_reasoning<br/><i>generator.py</i>"]
-        M8["module8_submission<br/><i>validator.py, writer.py</i>"]
+        M1["module1_jd_rubric"]
+        M2["module2_capability"]
+        M3["module3_capability_fit"]
+        M4["module4_behavioral"]
+        M5["module5_honeypot"]
+        M6["module6_ranking"]
+        M7["module7_reasoning"]
+        M8["module8_submission"]
     end
 
     SC --> M1
@@ -81,190 +84,182 @@ graph TD
     SC --> M4
     SC --> M5
     SC --> M6
+    SC --> M7
     SC --> M8
-    M --> M1
-    M --> M2
-    M --> M3
-    M --> M4
-    M --> M5
-    M --> M6
-    M --> M7
-    M --> M8
-    U --> M1
     U --> M2
     U --> M3
     U --> M4
-
-    M1 --> M2
-    M2 --> M3
-    M3 --> M6
-    M4 --> M6
-    M5 --> M6
+    U --> M7
     M6 --> M7
-    M7 --> M8
 ```
 
-Each module depends **only downward** — there are no circular imports and no cross-module state.
+Every module imports models from `shared/models`. Between modules, the only import is module7 using module6's `RankedEntry`. There are no circular imports and no shared mutable state.
 
 ---
 
-## Scoring Pipeline Detail
+## Stage Detail
 
-### Stage 1 — JD Profile Construction (one-time)
+### Stage 1: JD profile (once per run)
 
-Merges three sources into a single `JDProfile`:
+Combines three sources into one `JDProfile`:
 
 | Source | Provides |
 |--------|----------|
-| `ai_capability_ontology.json` | 9 capability nodes with importance weights and phrase families |
-| `jd_rubric.json` | Which nodes are nice-to-have, anti-signal keywords, consulting companies, target cities |
-| `scoring.py` | Penalty values, experience bands, behavioral weights, thresholds |
+| `ai_capability_ontology.json` | 9 capability nodes with importance weights and phrase lists |
+| `jd_rubric.json` | nice-to-have and ML-relevant nodes, anti-signal vocabulary and reasoning wording, consulting firms, logistics (home country, cities, preferred work modes) |
+| `scoring.py` | penalties, experience bands, thresholds and caps |
 
-**Design decision:** Separating *what to match* (JSON data) from *how much it matters* (Python constants) means adapting to a new role requires no code changes — only data file edits.
+The builder lower-cases all vocabulary once and checks that every node named in the rubric exists in the ontology and every anti-signal has a penalty. A missing or inconsistent entry stops the run with exit code 2.
 
-### Stage 2 — Capability Extraction
+Keeping *what to match* (JSON) separate from *how much it counts* (Python constants) means adapting to another role is a data change, not a code change.
 
-For each of the 9 ontology nodes, assigns a strength:
+### Stage 2: Capability extraction
 
-| Strength | Condition | Rationale |
-|----------|-----------|-----------|
-| **1.0** | Strong phrase found in career history (titles + descriptions) | Demonstrated work — highest confidence |
-| **1.0** | Skill at advanced/expert with assessment score ≥ 50 | Platform-verified proficiency |
-| **0.5** | Strong phrase found only in summary/headline/skills | Claimed but not demonstrated |
-| **0.5** | Weak phrase found in career history | Ambiguous evidence in a credible context |
-| **0.0** | No match, or weak phrase only in claimed text | No evidence or keyword-stuffing signature |
+Each of the 9 nodes gets a strength:
 
-The importance-weighted mean of all node strengths produces `base_capability ∈ [0, 1]`.
+| Strength | Source label | Condition |
+|----------|--------------|-----------|
+| 1.0 | `career` | strong phrase in career history (titles, descriptions) |
+| 1.0 | `skill_verified` | advanced/expert skill matching any node phrase, assessment ≥ 50, and a weak phrase for the node in career history |
+| 0.5 | `claimed` | strong phrase only in summary, headline or skills, or a verified skill with no career support |
+| 0.5 | `career_weak` | only a weak (generic) phrase in career history |
+| 0.0 | `none` | no evidence, or only a weak phrase in self-reported text |
 
-**Design decision:** The demonstrated-vs-claimed split is the core anti-gaming mechanism. A candidate who describes building a recommendation system earns full credit; one who merely lists "RAG" as a skill earns half. This asymmetry is what prevents keyword-stuffed profiles from ranking highly.
+`base_capability` is the importance-weighted mean of the strengths. `ml_relevant_months` sums the durations of roles matching any phrase of the rubric's `ml_nodes`, capped at the candidate's stated experience.
 
-### Stage 3 — Capability Fit Assembly
+Phrase matching: a phrase must start at a word boundary ("search" does not match "research"). Phrases of four characters or fewer must also end at one ("rag" does not match "ragged"). A trailing `*` marks a stem. A match preceded within three words of the same clause by a negation or comparison cue (than, toward, not, no, never, without) is ignored, so "lighter weight than ranking systems" is not ranking evidence. Each text part (title, description, summary, skill name) is matched once by a cached `PhraseIndex`, and a candidate's evidence is the union of its parts' phrase sets.
 
-Adjusts `base_capability` through four modifiers:
-
-```
-capability_fit = clamp₀₁(effective_base × E × D − anti_penalty + nice_bonus)
-```
-
-| Modifier | Range | Purpose |
-|----------|-------|---------|
-| Experience factor (E) | 0.70 – 1.00 | Peaks at 5–9 years; penalizes under-experience |
-| Domain depth factor (D) | 0.85 – 1.10 | Rewards ≥4 years of domain-relevant tenure |
-| Anti-signal penalties | 0.00 – 0.50 | Subtracts for negative indicators (research-only, framework-tutorial, etc.) |
-| Nice-to-have bonus | 0.00 – 0.10 | Small additive bonus for supplementary capability nodes |
-
-**Design decision:** Anti-signals are *subtractive*, not *multiplicative*. A research-only penalty reduces the score but doesn't zero it — preserving rank differentiation among imperfect candidates.
-
-### Stage 4 — Behavioral Multiplier
-
-Converts 23 platform engagement signals into 8 weighted sub-scores:
+### Stage 3: Capability fit
 
 ```
-behavioral_multiplier = 0.50 + 0.50 × Σ(wᵢ × sub_scoreᵢ)    ∈ [0.50, 1.00]
+capability_fit = clamp01((effective_base × E × D − anti_penalty + nice_bonus) / 1.2)
 ```
 
-| Sub-score (weight) | Signals Used |
-|--------------------|-------------|
-| Recency (0.30) | `last_active_date` vs. fixed reference date |
-| Responsiveness (0.25) | `recruiter_response_rate × time_factor` |
+1.2 is the largest value the numerator can reach (1.0 × 1.10 + 0.10), so the strongest profiles keep distinct scores instead of all clamping to 1.0.
+
+| Term | Range | Purpose |
+|------|-------|---------|
+| Experience factor E | 0.70-1.00 | peaks at 5-9 years |
+| ML-depth factor D | 0.85-1.10 | rewards years in ML-relevant roles |
+| Anti-signal penalty | 0.00-0.50 | subtracts for patterns the job rejects |
+| Nice-to-have bonus | 0.00-0.10 | small addition for supplementary nodes |
+
+`effective_base` is capped at 0.30 when the hard-DQ anti-signal (`research_only`) fires. Penalties are subtractive, so an imperfect candidate is lowered rather than zeroed.
+
+### Stage 4: Behavioral multiplier
+
+```
+behavioral_multiplier = 0.50 + 0.50 × Σ(wᵢ × sub_scoreᵢ)    in [0.50, 1.00]
+                        0.50 if unavailable (inactive > 180 days or response rate < 0.10)
+                        × 0.80 if outside the home country (no visa sponsorship)
+```
+
+| Sub-score (weight) | Signals |
+|--------------------|---------|
+| Recency (0.30) | days since `last_active_date`, measured from the reference date |
+| Responsiveness (0.25) | `recruiter_response_rate`, `avg_response_time_hours` |
 | Open to work (0.10) | `open_to_work_flag` |
 | Interview (0.10) | `interview_completion_rate` |
-| Offer (0.05) | `offer_acceptance_rate` |
-| Logistics (0.10) | `notice_period_days`, location match, work mode |
+| Offer (0.05) | `offer_acceptance_rate` (−1 = no history, scored 0.5) |
+| Logistics (0.10) | `notice_period_days`, location/country/`willing_to_relocate`, `preferred_work_mode` |
 | Demand (0.07) | `saved_by_recruiters_30d`, `search_appearance_30d` |
 | Trust (0.03) | `verified_email`, `verified_phone`, `linkedin_connected` |
 
-**Design decision:** The multiplier floor of 0.50 ensures behavior *rescales* capability but never overrides it. A strong but inactive candidate is halved, not dropped — the job spec says "down-weight the unavailable," not "exclude them."
+These use 14 of the 23 signals. The reference date is the latest `last_active_date` in the input (override with `--as-of`), so output does not depend on when the pipeline runs.
 
-**Design decision:** Recency is measured against a fixed date (the dataset's latest `last_active_date`), not `datetime.now()`. This guarantees deterministic output regardless of when the pipeline runs.
+### Stage 5: Honeypot detection
 
-### Stage 5 — Honeypot Detection
+| Rule | Fires when |
+|------|-----------|
+| H1 | ≥ 3 skills at advanced/expert with `duration_months == 0` |
+| H2 | total career months > `years_of_experience × 12 × 1.5 + 12` |
 
-Two rules detect provably-impossible profiles:
+On the 100K pool these flag 43 candidates (21 H1, 22 H2), whose final score is set to 0. The thresholds are conservative so that only genuinely impossible profiles are flagged.
 
-| Rule | Fires When | Interpretation |
-|------|-----------|----------------|
-| **H1** | ≥3 skills at advanced/expert with `duration_months == 0` | Claims expertise in skills they've never used |
-| **H2** | Total career months > `years_of_experience × 12 × 1.5 + 12` | More career history than their stated working life allows |
-
-Flagged candidates receive `final_score = 0.0` in Stage 6.
-
-**Design decision:** Conservative thresholds (fires on ~0.04% of the pool) — designed to catch only genuinely impossible profiles, never borderline cases. A keyword-stuffer with a plausible timeline is handled by Stages 2–3, not here.
-
-### Stage 6 — Streaming Top-K Selection
+### Stage 6: Streaming top-K
 
 ```python
-final_score = 0.0 if honeypot else capability_fit × behavioral_multiplier
+final = 0.0 if honeypot else round(capability_fit * behavioral_multiplier, 6)
 ```
 
-The top 100 candidates are maintained in a **bounded min-heap** of size K:
+- Each candidate is offered to a min-heap of size K (default 100, `--top-k`): O(N log K).
+- Heap elements are `(final, reversed candidate_id, ...)`, so on equal scores the larger id is evicted first, for any id format.
+- The score is rounded before insertion, so eviction and final ordering compare the value written to the CSV.
+- The retained entries are sorted by score descending, then candidate id ascending.
 
-- **Insert:** Each scored candidate is pushed into the heap. If `len(heap) > K`, the smallest element is evicted.
-- **Time complexity:** O(N log K) — one heap operation per candidate.
-- **Memory:** O(K) — only 100 candidates are retained at any time.
-- **Tie-breaking:** Score descending, then candidate ID ascending (enforced at both heap eviction and final sort).
+The heap carries each candidate's scoring objects, so module 7 needs no second pass over the input.
 
-**Design decision:** The heap carries each candidate's full scoring context (capability, fit, behavioral, honeypot objects) so that Module 7 can generate reasoning without re-reading the input file.
+### Stage 7: Reasoning
 
-### Stage 7 — Reasoning Generation
-
-Each of the top 100 receives a fact-grounded explanation built from a deterministic template:
+Each retained candidate gets a template-built line:
 
 ```
-"{title}, {years} yrs — {strengths}. {behavioral_note}. Concern: {concern}."
+first half:  "{title}, {years} yrs — {strengths}. {activity}. Concern: {gap}."
+second half: "{title}, {years} yrs — main gap: {gap}. {strengths}; {activity}."
+no gap:      "{title}, {years} yrs — {strengths}. {activity}. No material gap identified."
 ```
 
-Every claim references the candidate's own fields or a matched evidence phrase — nothing is fabricated. The tone varies by rank: top candidates lead with strengths, lower-ranked ones lead with concerns.
+The gap is the first that applies, in this order:
+1. a fired anti-signal
+2. a critical node with no evidence
+3. inactivity over 90 days or a recruiter response rate below 0.30
+4. a notice period of 90 days or more
+5. a critical node with only partial evidence
+6. a missing nice-to-have node
+7. under four years of ML tenure
 
-### Stage 8 — Validation & Output
+Thresholds are the `REASON_*` constants in `scoring.py`; anti-signal wording comes from the rubric. Partial evidence is described by its source: "only self-reported" for `claimed`, "only indirect … evidence in career history" with the matched phrase for `career_weak`.
 
-Before writing the CSV, a validator re-checks every rule:
+### Stage 8: Validation and output
 
-- Exactly 100 rows, ranks 1–100 with no gaps or duplicates
-- Scores are non-increasing by rank
-- Equal scores have IDs in ascending order
-- All candidate IDs match the `CAND_XXXXXXX` pattern and exist in the pool
-- No empty reasoning strings
-- Scores are not all identical (guards against degenerate output)
+Before writing, the validator checks:
 
-The pipeline **exits non-zero** if any check fails — an invalid CSV is never treated as success.
+- exactly K rows, ranks 1..K with no gaps or duplicates
+- scores non-increasing by rank, with equal scores in ascending id order
+- ids match `CANDIDATE_ID_PATTERN`, are unique and exist in the input pool
+- no empty reasoning
+- scores are not all identical
+
+Any failure exits with code 1 and no CSV is written. The writer formats scores to six decimals and prefixes an apostrophe to any reasoning that starts with `=`, `+`, `-` or `@`, so spreadsheets do not evaluate it as a formula.
 
 ---
 
-## Interface Contract
-
-Every module boundary is defined by a Pydantic `BaseModel`. The complete schema chain:
+## Data Contracts
 
 ```
-Candidate (input)
-    → CapabilityProfile (module 2 output)
-    → CapabilityFit (module 3 output)
-    → BehavioralProfile (module 4 output)
-    → HoneypotAnalysis (module 5 output)
-    → RankedEntry (module 6 output, internal dataclass)
-    → SubmissionRow (module 8 output)
+Candidate (input, validated per line)
+    → CapabilityProfile   (module 2)
+    → CapabilityFit       (module 3)
+    → BehavioralProfile   (module 4)
+    → HoneypotAnalysis    (module 5)
+    → RankedEntry         (module 6, dataclass)
+    → SubmissionRow       (module 8)
 ```
 
-All models live in `shared/models/` — modules import schemas, never each other's internals. Field constraints (ranges, patterns, enums) are enforced by Pydantic at parse time, so invalid data fails at the boundary.
+All models live in `shared/models/`. `JDProfile` carries the rubric to modules 3, 4 and 7, including the typed anti-signal vocabulary, reasoning wording and logistics settings. Input records that fail validation are logged and skipped, as are duplicate ids.
 
 ---
 
-## Performance Characteristics
+## Error Handling
 
-| Aspect | Design Choice | Impact |
-|--------|--------------|--------|
-| I/O | Single streaming pass over JSONL | Reads once, no random access |
-| Memory | Bounded heap (K=100) | Constant regardless of input size |
-| CPU | No regex in hot path (PhraseGroup uses string ops) | 6.7× faster than regex baseline |
-| Determinism | Fixed reference date, stable sort, rounded scores | Byte-identical output across runs |
-| Startup | Ontology + rubric loaded once, phrase groups compiled once | Amortized over 100K candidates |
+| Situation | Behaviour |
+|-----------|-----------|
+| Malformed JSON line or schema violation | logged, counted, skipped |
+| Duplicate candidate id | logged, counted, skipped (first occurrence kept) |
+| Missing input file, bad `--as-of`, non-positive `--limit` or `--top-k` | usage error, exit code 2 |
+| No `last_active_date` in the input and no `--as-of` | logged, exit code 2 |
+| Ontology or rubric missing a key or inconsistent | logged, exit code 2 |
+| Fewer than K valid candidates, or any output rule broken | errors logged, exit code 1, no CSV |
+| Output path not writable | logged, exit code 2 |
 
 ---
 
-## Reproducibility Guarantees
+## Performance
 
-1. **No wall-clock dependency** — recency uses a fixed AS_OF date
-2. **No randomness** — no random seeds, sampling, or stochastic algorithms
-3. **No floating-point order sensitivity** — scores are rounded to 6 decimals before comparison
-4. **No external state** — no database, cache, or network calls
-5. **Stable sorting** — Python's `sorted()` is stable; tie-breaks use candidate ID (unique)
+| Aspect | Choice | Effect |
+|--------|--------|--------|
+| I/O | single streaming pass over JSONL (or gzip) | input read once |
+| Memory | heap of K = 100 records, plus the id set | no full pool in memory |
+| CPU | each distinct text part matched once and cached (`PhraseIndex`); substring prefilter before boundary checks | module2 40 s → about 5 s; full run about 2.8× faster; see PERFORMANCE.md |
+| Determinism | reference date from the input (not the clock), rounded scores, id tie-break | byte-identical output across runs |
+| Setup | ontology, rubric and phrase groups built once | amortised over 100K candidates |

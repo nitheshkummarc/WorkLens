@@ -1,11 +1,10 @@
 # module1_jd_rubric
 
-Builds one `JDProfile` for the run by combining the ontology importances, the JD
-selections in `data/jd_rubric.json`, and the constants in `shared/config/scoring.py`.
-It runs once at startup and is reused for every candidate.
+Builds the `JDProfile` used for the whole run from the ontology importances, the role vocabulary in `data/jd_rubric.json`, and the constants in `shared/config/scoring.py`.
 
-`tier` (Critical / High / Medium / Nice) is only a display bucket of `importance`;
-scoring always uses the node-specific `importance`, never the tier.
+- Lower-cases all vocabulary once.
+- Marks nodes with importance ≥ 0.9 as critical.
+- Raises `ValueError` if the rubric names an unknown ontology node, an anti-signal without a penalty, or is missing a key. `rank.py` reports this and exits with code 2.
 
 ```python
 from modules.module1_jd_rubric import build_jd_profile

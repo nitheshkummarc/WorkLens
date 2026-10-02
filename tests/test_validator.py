@@ -1,60 +1,53 @@
-"""module8: the hard validation gate rejects every spec violation."""
+"""module8: the validator rejects each rule violation; the writer output is safe."""
 
 from __future__ import annotations
 
+import csv
+
+import pytest
+
 from shared.models.submission import SubmissionRow
-from modules.module8_submission import SubmissionValidator
-
-
-def _good_rows(n=100):
-    return [SubmissionRow(candidate_id=f"CAND_{i:07d}", rank=i, score=round(1.0 - i * 0.001, 6),
-                          reasoning=f"reason {i}") for i in range(1, n + 1)]
-
+from modules.module8_submission import SubmissionValidator, SubmissionWriter
 
 POOL = {f"CAND_{i:07d}" for i in range(1, 101)}
 
 
-def test_good_submission_passes():
-    assert SubmissionValidator(POOL).validate(_good_rows()) == []
+def _rows(n=100):
+    return [SubmissionRow(candidate_id=f"CAND_{i:07d}", rank=i, score=round(1.0 - i * 0.001, 6),
+                          reasoning=f"reason {i}") for i in range(1, n + 1)]
 
 
-def test_wrong_row_count_rejected():
-    assert SubmissionValidator(POOL).validate(_good_rows(99))
+def test_valid_submission_passes():
+    assert SubmissionValidator(POOL).validate(_rows()) == []
 
 
-def test_duplicate_rank_rejected():
-    rows = _good_rows()
-    rows[1].rank = 1
-    assert any("duplicate rank" in e for e in SubmissionValidator(POOL).validate(rows))
+def _wrong_count(rows): return rows[:99]
+def _duplicate_rank(rows): rows[1].rank = 1; return rows
+def _increasing(rows): rows[5].score = 9.9; return rows
+def _identical(rows):
+    for r in rows: r.score = 0.5
+    return rows
+def _not_in_pool(rows): rows[0].candidate_id = "CAND_9999999"; return rows
+def _empty_reason(rows): rows[3].reasoning = "   "; return rows
+def _tie_order(rows):
+    rows[0].candidate_id, rows[0].score = "CAND_0000050", 0.9
+    rows[1].score = 0.9
+    return rows
 
 
-def test_increasing_score_rejected():
-    rows = _good_rows()
-    rows[5].score = 9.9
-    assert any("increase" in e for e in SubmissionValidator(POOL).validate(rows))
+@pytest.mark.parametrize("mutate,message", [
+    (_wrong_count, "exactly 100"), (_duplicate_rank, "duplicate rank"), (_increasing, "increases"),
+    (_identical, "identical"), (_not_in_pool, "not in pool"), (_empty_reason, "empty reasoning"),
+    (_tie_order, "ascending"),
+])
+def test_rejections(mutate, message):
+    assert any(message in e for e in SubmissionValidator(POOL).validate(mutate(_rows())))
 
 
-def test_all_identical_scores_rejected():
-    rows = [SubmissionRow(candidate_id=f"CAND_{i:07d}", rank=i, score=0.5, reasoning="x")
-            for i in range(1, 101)]
-    assert any("identical" in e for e in SubmissionValidator(POOL).validate(rows))
-
-
-def test_id_not_in_pool_rejected():
-    rows = _good_rows()
-    rows[0] = SubmissionRow(candidate_id="CAND_9999999", rank=1, score=rows[0].score, reasoning="x")
-    assert any("not in pool" in e for e in SubmissionValidator(POOL).validate(rows))
-
-
-def test_empty_reasoning_rejected():
-    rows = _good_rows()
-    rows[3].reasoning = "   "
-    assert any("empty reasoning" in e for e in SubmissionValidator(POOL).validate(rows))
-
-
-def test_tie_break_id_order_enforced():
-    rows = _good_rows()
-    # make ranks 1 and 2 tie on score but put ids in the wrong order
-    rows[0] = SubmissionRow(candidate_id="CAND_0000050", rank=1, score=0.9, reasoning="a")
-    rows[1] = SubmissionRow(candidate_id="CAND_0000002", rank=2, score=0.9, reasoning="b")
-    assert any("ascending" in e for e in SubmissionValidator(POOL).validate(rows))
+def test_writer_format_and_formula_guard(tmp_path):
+    rows = _rows()
+    rows[0].reasoning = "=HYPERLINK(\"x\"), title"
+    written = list(csv.reader(SubmissionWriter().write(rows, tmp_path / "out.csv").open(encoding="utf-8")))
+    assert written[0] == ["candidate_id", "rank", "score", "reasoning"]
+    assert written[1][2] == "0.999000"
+    assert written[1][3].startswith("'=")

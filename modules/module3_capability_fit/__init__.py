@@ -1,4 +1,4 @@
-"""Apply rubric adjustments and assemble the capability_fit score."""
+"""Apply the rubric adjustments and assemble capability_fit."""
 
 from __future__ import annotations
 
