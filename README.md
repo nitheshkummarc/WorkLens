@@ -13,7 +13,7 @@ WorkLens ranks 100,000 candidate profiles against a structured job specification
 ## Highlights
 
 - **Configuration-driven.** The role is described by two JSON files and one constants module; adapting to another role does not require code changes. The recency reference date is detected from the input, and the id format and list size are settings.
-- **Checked against the job description.** An independent review of the output grades all of the top 10 as strong matches (see [docs/RANKING_REVIEW.md](docs/RANKING_REVIEW.md)).
+- **Checked against the job description.** An independent review of the output grades all of the top 10 and 66 of the top 100 as strong matches, with no honeypots in the list (see [Ranking quality](#ranking-quality)).
 - **Streaming top-K.** A bounded min-heap keeps the best K candidates in one pass: O(N log K) time, with only K candidate records held in memory.
 - **Deterministic and explainable.** The same input produces a byte-identical CSV, and every row has a reason built from the candidate's own data.
 - **Typed stage boundaries.** Each stage exchanges Pydantic models; malformed input records are logged and skipped.
@@ -43,6 +43,24 @@ The run is about **2.8× faster** than the submitted version (CPU time, alternat
 - A substring prefilter skips the word-boundary check for absent phrases.
 
 See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the measurements, the correctness argument and the rejected alternatives.
+
+---
+
+## Ranking quality
+
+Each candidate in the output was graded by hand from the raw profile against the job description, before and after the post-submission fixes:
+
+| | Top 10 | Top 100 |
+|---|---|---|
+| Submitted version | 8 Strong, 1 Good, 1 Weak | 34 Strong, 20 Good, 46 Weak |
+| Current version | 10 Strong | 66 Strong, 28 Good, 2 Partial, 4 Weak |
+
+- Experience is graded by where it appears: a phrase in a job description counts fully, a self-reported skill counts half, and a skill listed without any related career text is not treated as verified.
+- Candidates who are inactive for more than 180 days or answer fewer than 10% of recruiters are scored as unavailable; candidates outside India are down-weighted, since the role does not sponsor visas.
+- 43 honeypot profiles (impossible skill or career data) are excluded.
+- With the weights scaled by up to ±15% and the factors shifted by up to ±0.05 (8 random trials on 8,000 candidates), on average 95-97% of the top 10, 50 and 100 stays the same ([sensitivity check](docs/DESIGN_DECISIONS.md)).
+
+Details: [docs/RANKING_REVIEW.md](docs/RANKING_REVIEW.md).
 
 ---
 
@@ -114,6 +132,15 @@ tests/               pytest suite
 docs/                Architecture, methodology, scoring design, design decisions, performance, ranking review
 ```
 
+| Document | Contents |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | stages, data flow, models |
+| [SCORING_DESIGN.md](docs/SCORING_DESIGN.md) | every formula and constant |
+| [METHODOLOGY.md](docs/METHODOLOGY.md) | how the job description was turned into the ontology and rubric |
+| [DESIGN_DECISIONS.md](docs/DESIGN_DECISIONS.md) | choices made and alternatives rejected |
+| [PERFORMANCE.md](docs/PERFORMANCE.md) | profiling, the module2 speed-up, measurements |
+| [RANKING_REVIEW.md](docs/RANKING_REVIEW.md) | hand review of the output against the job description |
+
 ---
 
 ## Testing
@@ -124,3 +151,10 @@ pytest
 ```
 
 34 test functions (93 cases) cover phrase matching and negation, every evidence tier, every anti-signal rule, behavioural scoring and availability rules, honeypot rules, top-K ranking, reasoning text, input reading, output validation, and end-to-end runs of `rank.py`. Repeated checks are table-driven (`pytest.mark.parametrize`). All tests build synthetic candidates in-process and do not need the candidate pool.
+
+### Tools
+
+```bash
+python tools/sensitivity.py --candidates ./candidates.jsonl     # top-K stability under perturbed constants
+python tools/bench_matcher.py --candidates ./candidates.jsonl   # module2 vs. a regex reference: identical output, timing
+```
